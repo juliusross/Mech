@@ -62,4 +62,4 @@ npm test
 npm run build
 ```
 
-Work is on the local `multiplayer-movement` branch. It has not been pushed to GitHub or deployed. The existing Vercel production deployment follows `main`.
+Work is on the `multiplayer-movement` branch. Online multiplayer has not been deployed. The existing Vercel production deployment follows `main`.
