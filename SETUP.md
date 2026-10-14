@@ -34,18 +34,18 @@ This remains a single-player prototype. Mouse movement does not aim; Q/E rotates
 
 ## GitHub and Vercel
 
-Local Git is initialized on `main`. Source files are staged. No commit was created because no Git author identity is configured. No GitHub remote or Vercel deployment has been created.
+Live game: https://mech-five.vercel.app/
+Repository: https://github.com/juliusross/Mech
+Vercel dashboard: https://vercel.com/juliuus-projects/mech
 
-Next steps after signing in:
+Verified October 14, 2026:
 
-1. Create a private GitHub repository named `mechverse-prototype-0.1` (or choose another name). Do not initialize it with additional files.
-2. Configure this repository's Git author name and verified or GitHub-provided noreply email, commit the staged source, add the repository remote, and push `main`.
-3. Import that repository into Vercel and grant access to this repository when prompted.
-4. Use the Vite framework preset, project root `.`, install command `npm ci`, build command `npm run build`, and output directory `dist`. These build settings are included in `vercel.json`. No environment variables are required.
-5. Open the resulting deployment URL and repeat rendering, camera, firing, and reload checks before sharing it.
+- Vercel reports the production deployment Ready, from main commit 7946ccfa4e13255feeb08363ba16984839f1f5d9.
+- The live page is publicly accessible without Vercel login.
+- Live browser checks passed for rendering, movement, firing, target destruction, all camera modes, and reloading. No browser console warnings or errors were observed.
+- The dashboard identifies main as the production branch; pushing to main updates this deployment.
+- The local repository tracks origin/main. The multiplayer-movement branch now contains the local multiplayer milestone described in MULTIPLAYER.md. Production still serves the solo source on main. Local setup notes and the original launcher's executable permission also differ from the uploaded version.
 
-Account sign-in is required on both services. GitHub repository access authorization for Vercel must be approved by the account owner when requested. Choose a supported Node version in Vercel and verify its build; the local build was tested on Node 26.7.0.
+The local launcher remains usable on this Mac. A fresh GitHub clone may require `chmod +x "Start MECHVERSE.command"` before double-clicking the launcher, because browser upload did not preserve its executable permission.
 
-Official references:
-- https://docs.github.com/en/migrations/importing-source-code/using-the-command-line-to-import-source-code/adding-locally-hosted-code-to-github
-- https://vercel.com/docs/frameworks/frontend/vite
+This deployment is still the single-player prototype. Sharing the link lets each person play separately; multiplayer is not implemented.
