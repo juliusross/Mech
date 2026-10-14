@@ -43,7 +43,11 @@ The current preview is loopback-only. Its invite links work on this Mac, not on 
 
 Four simultaneous browser sessions, different physical computers, high-latency connections, mobile devices, and automatic reconnection have not been validated in this milestone.
 
-## Online hosting preparation
+## Online hosting
+
+Room server: https://mechverse-rooms.onrender.com (Render free plan, branch `multiplayer-movement`, manual deploys). Free instances sleep after ~15 idle minutes; the first connection then takes up to a minute. Deployed web builds connect to it by default; `VITE_MULTIPLAYER_URL` overrides that. To allow another site, add its exact origin to `ALLOWED_ORIGINS` in Render.
+
+### Original preparation notes
 
 This feature needs a persistent Node WebSocket server in addition to the Vercel frontend. Render web services support WebSockets: https://render.com/docs/websocket . No new hosting account, paid service, or online multiplayer deployment has been created.
 

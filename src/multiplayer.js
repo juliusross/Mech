@@ -2,11 +2,13 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 const initial = { status: "solo", players: [], targets: [], error: "" };
 const local = ["localhost", "127.0.0.1"].includes(window.location.hostname);
+// The hosted room server only accepts origins listed in its ALLOWED_ORIGINS.
+const HOSTED = "wss://mechverse-rooms.onrender.com/multiplayer";
 const endpoint =
   import.meta.env.VITE_MULTIPLAYER_URL ||
   (local
     ? `${location.protocol === "https:" ? "wss:" : "ws:"}//${location.host}/multiplayer`
-    : "");
+    : HOSTED);
 
 export function useMultiplayer() {
   const [session, setSession] = useState(initial);
