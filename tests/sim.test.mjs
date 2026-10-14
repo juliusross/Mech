@@ -84,3 +84,77 @@ test("targets alone do not clear a wave while drones remain", () => {
   step(world, [], 0.05, 50);
   assert.equal(world.waveAt, 0);
 });
+
+import { repair, setClass, drainEvents, PVP_DAMAGE, PVP_KO_SCORE } from "../shared/sim.js";
+import { CLASSES, REPAIR_AMOUNT } from "../shared/arena.js";
+
+test("classes set armor, and heavy shots deal double damage", () => {
+  const world = createWorld(fixed);
+  world.drones = [];
+  const heavy = createPilot([0, 0, 8], "heavy");
+  const scout = createPilot([4, 0, 8], "scout");
+  assert.equal(heavy.armor, CLASSES.heavy.armor);
+  assert.equal(scout.armor, CLASSES.scout.armor);
+  assert.equal(createPilot([0, 0, 0], "wizard").cls, "assault");
+  // Target 1 sits at x = -4.5, z = -15 with 3 hp: two heavy shots destroy it.
+  for (let i = 0; i < 2; i++) {
+    fire(world, heavy, [-4.5, 2.5, -6], [0, 0, -1]);
+    run(world, [heavy], 0.4, i * 400);
+  }
+  assert.equal(world.targets[1].hp, 0);
+  assert.equal(heavy.score, 1);
+  heavy.armor = CLASSES.heavy.armor / 2;
+  setClass(heavy, "scout");
+  assert.equal(heavy.armor, CLASSES.scout.armor / 2, "switching keeps the armor percentage");
+});
+
+test("support repair heals nearby pilots and then cools down", () => {
+  const world = createWorld(fixed);
+  const medic = createPilot([0, 0, 8], "support");
+  const near = createPilot([6, 0, 8]);
+  const far = createPilot([40, 0, 8]);
+  medic.armor = 10;
+  near.armor = 50;
+  far.armor = 50;
+  assert.equal(repair(world, medic, [medic, near, far], 1000), true);
+  assert.equal(medic.armor, 10 + REPAIR_AMOUNT);
+  assert.equal(near.armor, 50 + REPAIR_AMOUNT);
+  assert.equal(far.armor, 50);
+  assert.equal(repair(world, medic, [medic, near, far], 2000), false, "cooling down");
+  assert.equal(repair(world, near, [near], 1000), false, "only support can repair");
+  assert.deepEqual(drainEvents(world).map((e) => e.kind), ["repair"]);
+  assert.equal(drainEvents(world).length, 0);
+});
+
+test("versus rooms let pilots damage and down each other; co-op rooms do not", () => {
+  for (const pvp of [false, true]) {
+    const world = createWorld(fixed, { pvp });
+    world.drones = [];
+    world.targets = [];
+    const a = createPilot([0, 0, 8]);
+    const b = createPilot([0, 0, -2]);
+    b.armor = PVP_DAMAGE;
+    fire(world, a, [0, 2.5, 6], [0, 0, -1]);
+    run(world, [a, b], 0.5);
+    if (pvp) {
+      assert.equal(b.armor, 0);
+      assert.ok(b.downUntil);
+      assert.equal(a.score, PVP_KO_SCORE);
+      assert.ok(drainEvents(world).some((e) => e.kind === "down"));
+    } else {
+      assert.equal(b.armor, PVP_DAMAGE);
+      assert.equal(a.score, 0);
+    }
+  }
+});
+
+test("destroying things emits explosion events", () => {
+  const world = createWorld(fixed);
+  world.drones = [];
+  const pilot = createPilot([0, 0, 8]);
+  world.targets[1].hp = 1;
+  fire(world, pilot, [-4.5, 2.5, -6], [0, 0, -1]);
+  run(world, [pilot], 0.4);
+  const kinds = drainEvents(world).map((e) => e.kind);
+  assert.ok(kinds.includes("boom"));
+});

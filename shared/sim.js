@@ -6,12 +6,20 @@ import {
   BULLET_SPEED,
   BULLET_LIFE,
   hitsTarget,
+  CLASSES,
+  classOf,
+  REPAIR_AMOUNT,
+  REPAIR_RANGE,
+  REPAIR_COOLDOWN,
 } from "./arena.js";
 
 export const MAX_ARMOR = 100;
 export const BOLT_DAMAGE = 6;
 export const RESPAWN_MS = 3000;
 export const WAVE_DELAY = 4000;
+// In versus rooms one point of cannon damage removes this much armor.
+export const PVP_DAMAGE = 5;
+export const PVP_KO_SCORE = 5;
 const DRONE_HP = 4;
 const DRONE_SPEED = 7;
 const DRONE_RANGE = 45;
@@ -24,21 +32,33 @@ const PILOT_RADIUS = 1.7;
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 const chest = (p) => [p.position[0], p.position[1] + 2.5, p.position[2]];
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+export const maxArmor = (p) => classOf(p.cls).armor;
 
-export function createPilot(spawn) {
+export function createPilot(spawn, cls = "assault") {
   return {
     position: [...spawn],
     spawn: [...spawn],
-    armor: MAX_ARMOR,
+    cls: CLASSES[cls] ? cls : "assault",
+    armor: classOf(cls).armor,
     downUntil: 0,
     respawns: 0,
     score: 0,
+    repairAt: 0,
   };
 }
 
-export function createWorld(random = Math.random) {
+export function setClass(pilot, cls) {
+  if (!CLASSES[cls]) return;
+  // Keep the same armor percentage so switching is never a free heal.
+  const ratio = pilot.armor / maxArmor(pilot);
+  pilot.cls = cls;
+  pilot.armor = Math.round(ratio * maxArmor(pilot));
+}
+
+export function createWorld(random = Math.random, { pvp = false } = {}) {
   const world = {
     random,
+    pvp,
     nextId: 1,
     wave: 1,
     waveAt: 0,
@@ -46,6 +66,7 @@ export function createWorld(random = Math.random) {
     drones: [],
     bolts: [],
     shots: [],
+    events: [],
   };
   startWave(world);
   return world;
@@ -66,8 +87,45 @@ function startWave(world) {
   world.bolts = [];
 }
 
+const event = (world, kind, pos) =>
+  world.events.push({ id: world.nextId++, kind, p: pos.map((v) => Math.round(v * 100) / 100) });
+
+/** Returns and clears the effect events (hits, explosions, repairs, downs). */
+export function drainEvents(world) {
+  const events = world.events;
+  world.events = [];
+  return events;
+}
+
 export function fire(world, pilot, origin, dir) {
-  world.shots.push({ id: world.nextId++, by: pilot, pos: [...origin], dir: [...dir], life: BULLET_LIFE });
+  world.shots.push({
+    id: world.nextId++,
+    by: pilot,
+    damage: classOf(pilot.cls).damage,
+    pos: [...origin],
+    dir: [...dir],
+    life: BULLET_LIFE,
+  });
+}
+
+/** Support pulse: repairs the caster and every active pilot in range. */
+export function repair(world, pilot, pilots, now) {
+  if (!classOf(pilot.cls).repair || pilot.downUntil || now < pilot.repairAt)
+    return false;
+  pilot.repairAt = now + REPAIR_COOLDOWN * 1000;
+  for (const p of pilots)
+    if (!p.downUntil && dist(chest(p), chest(pilot)) <= REPAIR_RANGE)
+      p.armor = Math.min(maxArmor(p), p.armor + REPAIR_AMOUNT);
+  event(world, "repair", pilot.position);
+  return true;
+}
+
+function damagePilot(world, p, amount, now) {
+  p.armor = Math.max(0, p.armor - amount);
+  if (p.armor) return false;
+  p.downUntil = now + RESPAWN_MS;
+  event(world, "down", chest(p));
+  return true;
 }
 
 export function step(world, pilots, dt, now) {
@@ -81,7 +139,7 @@ export function step(world, pilots, dt, now) {
   for (const p of pilots)
     if (p.downUntil && now >= p.downUntil) {
       p.downUntil = 0;
-      p.armor = MAX_ARMOR;
+      p.armor = maxArmor(p);
       p.position = [...p.spawn];
       p.respawns++;
       changed = true;
@@ -131,10 +189,12 @@ export function step(world, pilots, dt, now) {
     for (let i = 0; i < steps && b.life > 0; i++) {
       for (let a = 0; a < 3; a++) b.pos[a] += b.dir[a] * BOLT_SPEED * h;
       b.life -= h;
-      const hit = alive.find((p) => !p.downUntil && dist(b.pos, chest(p)) < PILOT_RADIUS);
+      const hit = alive.find(
+        (p) => !p.downUntil && dist(b.pos, chest(p)) < PILOT_RADIUS * classOf(p.cls).scale,
+      );
       if (hit) {
-        hit.armor = Math.max(0, hit.armor - BOLT_DAMAGE);
-        if (!hit.armor) hit.downUntil = now + RESPAWN_MS;
+        damagePilot(world, hit, BOLT_DAMAGE, now);
+        event(world, "hit", b.pos);
         b.life = 0;
       }
     }
@@ -149,15 +209,36 @@ export function step(world, pilots, dt, now) {
       s.life -= h;
       const credit = pilots.includes(s.by);
       const t = world.targets.find((t) => t.hp > 0 && hitsTarget(s.pos, t));
-      const d = !t && world.drones.find((d) => d.hp > 0 && dist(s.pos, d.pos) < DRONE_RADIUS);
+      const d =
+        !t && world.drones.find((d) => d.hp > 0 && dist(s.pos, d.pos) < DRONE_RADIUS);
+      const rival =
+        world.pvp &&
+        !t &&
+        !d &&
+        alive.find(
+          (p) =>
+            p !== s.by &&
+            !p.downUntil &&
+            dist(s.pos, chest(p)) < PILOT_RADIUS * classOf(p.cls).scale,
+        );
       if (t) {
-        t.hp--;
-        if (!t.hp && credit) s.by.score++;
+        t.hp = Math.max(0, t.hp - s.damage);
+        if (!t.hp) {
+          if (credit) s.by.score++;
+          event(world, "boom", [t.x, 1.8, t.z]);
+        }
       } else if (d) {
-        d.hp--;
-        if (!d.hp && credit) s.by.score += 2;
+        d.hp = Math.max(0, d.hp - s.damage);
+        if (!d.hp) {
+          if (credit) s.by.score += 2;
+          event(world, "boom", d.pos);
+        }
+      } else if (rival) {
+        if (damagePilot(world, rival, s.damage * PVP_DAMAGE, now) && credit)
+          s.by.score += PVP_KO_SCORE;
       }
-      if (t || d) {
+      if (t || d || rival) {
+        if (!(t && !t.hp) && !(d && !d.hp)) event(world, "hit", s.pos);
         s.life = 0;
         changed = true;
       }
@@ -173,6 +254,7 @@ export function step(world, pilots, dt, now) {
     world.waveAt = now + WAVE_DELAY;
     changed = true;
   }
+  if (world.events.length) changed = true;
   return changed;
 }
 
@@ -186,5 +268,6 @@ export function view(world) {
     bolts: world.bolts.map((b) => ({ id: b.id, p: b.pos.map(r2) })),
     wave: world.wave,
     cleared: Boolean(world.waveAt),
+    pvp: world.pvp,
   };
 }

@@ -10,24 +10,43 @@ import {
   TARGETS,
   TARGET_HP,
   MAX_AMMO,
-  FIRE_INTERVAL,
   BULLET_SPEED,
   BULLET_LIFE,
   hitsTarget,
+  CLASSES,
+  classOf,
+  REPAIR_COOLDOWN,
 } from "../shared/arena.js";
 import {
   createWorld,
   createPilot,
+  setClass,
   fire,
+  repair,
   step,
   view,
+  drainEvents,
   MAX_ARMOR,
 } from "../shared/sim.js";
+const CLASS_IDS = Object.keys(CLASSES);
+function savedClass() {
+  try {
+    const v = localStorage.getItem("mechverse-class");
+    return CLASSES[v] ? v : "assault";
+  } catch {
+    return "assault";
+  }
+}
 const INITIAL_TARGETS = TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
-function Titan({ position, heading, color = "#e17b35", down = false }) {
+function Titan({ position, heading, color = "#e17b35", down = false, cls }) {
   if (down) color = "#3a3f47";
+  const spec = classOf(cls);
   return (
-    <group position={position} rotation={[down ? -0.45 : 0, heading, 0]}>
+    <group
+      position={position}
+      rotation={[down ? -0.45 : 0, heading, 0]}
+      scale={spec.scale}
+    >
       <mesh position={[0, 2.5, 0]} castShadow>
         <boxGeometry args={[2.2, 2.2, 1.35]} />
         <meshStandardMaterial color="#405775" metalness={0.7} roughness={0.3} />
@@ -39,11 +58,21 @@ function Titan({ position, heading, color = "#e17b35", down = false }) {
       <mesh position={[0, 4.15, -0.51]}>
         <boxGeometry args={[0.85, 0.2, 0.08]} />
         <meshStandardMaterial
-          color="#00d9ff"
-          emissive="#008cbb"
-          emissiveIntensity={2}
+          color={spec.visor}
+          emissive={spec.visor}
+          emissiveIntensity={1.6}
         />
       </mesh>
+      {cls === "support" && (
+        <mesh position={[0, 2.6, 0.72]}>
+          <boxGeometry args={[0.9, 0.9, 0.12]} />
+          <meshStandardMaterial
+            color="#5dff9a"
+            emissive="#1fbf5a"
+            emissiveIntensity={1.5}
+          />
+        </mesh>
+      )}
       {[-1, 1].map((s) => (
         <group key={s}>
           <mesh position={[s * 1.55, 2.5, 0]}>
@@ -61,7 +90,9 @@ function Titan({ position, heading, color = "#e17b35", down = false }) {
         </group>
       ))}
       <mesh position={[1.55, 2.4, -0.9]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[0.28, 0.35, 2.3, 12]} />
+        <cylinderGeometry
+          args={cls === "heavy" ? [0.45, 0.55, 2.8, 12] : [0.28, 0.35, 2.3, 12]}
+        />
         <meshStandardMaterial color="#1c2734" metalness={0.8} />
       </mesh>
       <pointLight
@@ -90,8 +121,18 @@ function RemoteTitan({ pilot }) {
   });
   return (
     <group ref={group} position={initialPosition.current}>
-      <Titan position={[0, 0, 0]} heading={0} color={pilot.color} down={pilot.down} />
-      <Html position={[0, 5.3, 0]} center style={{ pointerEvents: "none" }}>
+      <Titan
+        position={[0, 0, 0]}
+        heading={0}
+        color={pilot.color}
+        down={pilot.down}
+        cls={pilot.cls}
+      />
+      <Html
+        position={[0, 5.3 * classOf(pilot.cls).scale, 0]}
+        center
+        style={{ pointerEvents: "none" }}
+      >
         <span className="pilot-label">{pilot.name}</span>
       </Html>
     </group>
@@ -161,7 +202,54 @@ function Bolt({ bolt }) {
     </Follow>
   );
 }
-function Arena({ controls, mode, onHud, onAmmo, network }) {
+const EFFECT_LIFE = { boom: 0.7, hit: 0.25, repair: 0.8, down: 0.9 };
+function Effect({ effect, onDone }) {
+  const mesh = useRef();
+  const material = useRef();
+  const age = useRef(0);
+  const life = EFFECT_LIFE[effect.kind] ?? 0.5;
+  useFrame((_, dt) => {
+    age.current += dt;
+    const t = Math.min(1, age.current / life);
+    const size =
+      effect.kind === "boom"
+        ? 0.6 + t * 4.2
+        : effect.kind === "repair"
+          ? 1 + t * 13
+          : effect.kind === "down"
+            ? 0.5 + t * 3
+            : 0.3 + t * 0.9;
+    mesh.current?.scale.setScalar(size);
+    if (material.current) material.current.opacity = (1 - t) * 0.85;
+    if (t >= 1) onDone(effect.id);
+  });
+  const color = {
+    boom: "#ffb347",
+    hit: "#fff3c4",
+    repair: "#5dff9a",
+    down: "#ff4a6a",
+  }[effect.kind];
+  return (
+    <mesh
+      ref={mesh}
+      position={effect.p}
+      rotation={effect.kind === "repair" ? [-Math.PI / 2, 0, 0] : [0, 0, 0]}
+    >
+      {effect.kind === "repair" ? (
+        <torusGeometry args={[1, 0.06, 6, 40]} />
+      ) : (
+        <sphereGeometry args={[1, 14, 10]} />
+      )}
+      <meshBasicMaterial
+        ref={material}
+        color={color}
+        transparent
+        depthWrite={false}
+      />
+    </mesh>
+  );
+}
+function Arena({ controls, mode, onHud, onAmmo, network, cls }) {
   const { camera } = useThree();
   const pos = useRef(new THREE.Vector3(...(network.spawn || [0, 0, 8])));
   const yaw = useRef(0);
@@ -179,7 +267,21 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
   // local bullets are tracers only.
   const solo = useRef(null);
   if (!connected && !solo.current) solo.current = createWorld();
-  const me = useRef(createPilot(network.spawn || [0, 0, 8]));
+  const me = useRef(createPilot(network.spawn || [0, 0, 8], cls));
+  const [effects, setEffects] = useState([]);
+  const addEffects = (list) =>
+    setEffects((old) =>
+      [
+        ...old,
+        ...list.map((e) =>
+          e.kind === "repair" ? { ...e, p: [e.p[0], 0.3, e.p[2]] } : e,
+        ),
+      ].slice(-40),
+    );
+  const removeEffect = (id) =>
+    setEffects((old) => old.filter((e) => e.id !== id));
+  const repairHeld = useRef(false);
+  const repairReady = useRef(0);
   const [soloScene, setSoloScene] = useState(() => solo.current && view(solo.current));
   const scene = connected
     ? {
@@ -188,6 +290,7 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
         bolts: network.bolts || [],
         wave: network.wave ?? 1,
         cleared: network.cleared,
+        pvp: network.pvp,
       }
     : soloScene;
   const shownTargets = INITIAL_TARGETS.map((t, i) => ({
@@ -198,7 +301,8 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
   live.current = { targets: shownTargets, drones: scene.drones };
   const wasDown = useRef(false);
   const lastHud = useRef("");
-  const { onShot } = network;
+  const { onShot, onEvents } = network;
+  useEffect(() => onEvents(addEffects), [onEvents]);
   useEffect(
     () =>
       onShot((shot) =>
@@ -242,6 +346,15 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
     }
     wasDown.current = down;
     const k = down ? new Set() : controls.current;
+    const spec = classOf(cls);
+    const now = performance.now();
+    if (!connected && me.current.cls !== cls) setClass(me.current, cls);
+    if (k.has("g") && !repairHeld.current && spec.repair && now >= repairReady.current) {
+      if (connected) network.sendRepair();
+      else repair(solo.current, me.current, [me.current], now);
+      repairReady.current = now + REPAIR_COOLDOWN * 1000;
+    }
+    repairHeld.current = k.has("g");
     if (k.has("q")) yaw.current += 1.8 * dt;
     if (k.has("e")) yaw.current -= 1.8 * dt;
     const forward = new THREE.Vector3(
@@ -262,10 +375,10 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
     if (move.lengthSq()) move.normalize();
     const flying = k.has("f");
     if (k.has("shift") && dodge.current <= 0) {
-      dodge.current = 1.5;
+      dodge.current = spec.dodgeCooldown;
       burst.current = 0.22;
     }
-    const speed = burst.current > 0 ? 25 : 9;
+    const speed = burst.current > 0 ? spec.speed * 2.8 : spec.speed;
     burst.current -= dt;
     dodge.current -= dt;
     pos.current.addScaledVector(move, speed * dt);
@@ -300,7 +413,7 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
     ) {
       ammo.current--;
       onAmmo(ammo.current);
-      cooldown.current = FIRE_INTERVAL;
+      cooldown.current = spec.fireInterval;
       const origin = pos.current
         .clone()
         .add(
@@ -328,7 +441,18 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
           live.current.targets.some((t) => t.hp > 0 && hitsTarget(p, t)) ||
           live.current.drones.some(
             (d) => Math.hypot(p[0] - d.p[0], p[1] - d.p[1], p[2] - d.p[2]) < 1.8,
-          )
+          ) ||
+          (network.pvp &&
+            network.players.some(
+              (o) =>
+                o.id !== network.id &&
+                !o.down &&
+                Math.hypot(
+                  p[0] - o.position[0],
+                  p[1] - o.position[1] - 2.5,
+                  p[2] - o.position[2],
+                ) < 1.7,
+            ))
         )
           b.life = 0;
         return b.life > 0;
@@ -339,14 +463,21 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
       network.sendMovement(pos.current.toArray(), yaw.current);
     } else {
       me.current.position = pos.current.toArray();
-      step(solo.current, [me.current], dt, performance.now());
+      step(solo.current, [me.current], dt, now);
+      const events = drainEvents(solo.current);
+      if (events.length) addEffects(events);
       setSoloScene(view(solo.current));
       setBulletVisual(
         solo.current.shots.map((s) => ({ id: s.id, pos: [...s.pos] })),
       );
     }
     const hud = {
-      armor: pilot?.armor ?? MAX_ARMOR,
+      armor: pilot?.armor ?? spec.armor,
+      maxArmor: classOf(pilot?.cls ?? cls).armor,
+      repairIn: spec.repair
+        ? Math.max(0, Math.ceil((repairReady.current - now) / 1000))
+        : null,
+      pvp: Boolean(scene.pvp),
       down,
       score: pilot?.score ?? 0,
       wave: scene.wave,
@@ -368,6 +499,7 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
         : mode === 1
           ? new THREE.Vector3(3, 5, 9)
           : new THREE.Vector3(0, 4, -0.1);
+    offset.multiplyScalar(mode === 2 ? spec.scale : Math.max(1, spec.scale));
     offset.applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw.current);
     const desired = pos.current.clone().add(offset);
     camera.position.lerp(desired, Math.min(1, dt * 8));
@@ -390,6 +522,7 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
           heading={angle}
           color={network.color}
           down={wasDown.current}
+          cls={cls}
         />
       )}
       {network.players
@@ -426,6 +559,9 @@ function Arena({ controls, mode, onHud, onAmmo, network }) {
       {scene.bolts.map((b) => (
         <Bolt key={b.id} bolt={b} />
       ))}
+      {effects.map((e) => (
+        <Effect key={e.id} effect={e} onDone={removeEffect} />
+      ))}
       {bulletVisual.map((b) => (
         <mesh key={b.id} position={b.pos}>
           <sphereGeometry args={[0.25, 8, 8]} />
@@ -448,6 +584,14 @@ function App() {
   const [ammo, setAmmo] = useState(MAX_AMMO);
   const connected = network.status === "connected";
   const [hud, setHud] = useState(null);
+  const [cls, setCls] = useState(savedClass);
+  const chooseClass = (next) => {
+    setCls(next);
+    try {
+      localStorage.setItem("mechverse-class", next);
+    } catch {}
+    if (connected) network.sendClass(next);
+  };
   const [hit, setHit] = useState(0);
   const lastArmor = useRef(MAX_ARMOR);
   const onHud = (next) => {
@@ -455,7 +599,9 @@ function App() {
     lastArmor.current = next.armor;
     setHud(next);
   };
-  const [help, setHelp] = useState(true);
+  const [help, setHelp] = useState(
+    () => !matchMedia("(max-width: 600px)").matches,
+  );
   useEffect(() => {
     controls.current.clear();
     setAmmo(MAX_AMMO);
@@ -527,13 +673,31 @@ function App() {
           mode={camera}
           onHud={onHud}
           onAmmo={setAmmo}
+          cls={cls}
         />
       </Canvas>
       <div className="hud">
         <strong>
           MECHVERSE <span>0.1</span>
         </strong>
-        <small>TITAN 01 · TEST ARENA</small>
+        <small>
+          {classOf(cls).name.toUpperCase()} TITAN ·{" "}
+          {hud?.pvp ? "VERSUS ARENA" : "TEST ARENA"}
+        </small>
+        <div className="class-picker" role="group" aria-label="Mech class">
+          {CLASS_IDS.map((id) => (
+            <button
+              key={id}
+              aria-pressed={cls === id}
+              disabled={hud?.down}
+              title={CLASSES[id].blurb}
+              onClick={() => chooseClass(id)}
+            >
+              {CLASSES[id].name}
+            </button>
+          ))}
+        </div>
+        <p className="class-blurb">{classOf(cls).blurb}</p>
         <p>
           {!hud
             ? "Wave 1"
@@ -544,9 +708,18 @@ function App() {
         <p>
           Score: {hud?.score ?? 0} · Ammo: {ammo}/{MAX_AMMO} · R reload
         </p>
-        <p className={(hud?.armor ?? MAX_ARMOR) <= 30 ? "armor low" : "armor"}>
-          Armor: {hud?.armor ?? MAX_ARMOR}% · Flight: Unlimited
-        </p>
+        {(() => {
+          const max = hud?.maxArmor ?? classOf(cls).armor;
+          const pct = Math.round(((hud?.armor ?? max) / max) * 100);
+          return (
+            <p className={pct <= 30 ? "armor low" : "armor"}>
+              Armor: {pct}% ({hud?.armor ?? max}/{max})
+            </p>
+          );
+        })()}
+        {hud?.repairIn != null && (
+          <p>{hud.repairIn ? `Repair recharging · ${hud.repairIn}s` : "Repair ready · press G"}</p>
+        )}
         <button onClick={() => setCamera((v) => (v + 1) % 3)}>
           Camera: {["Third-person", "Shoulder", "First-person"][camera]}
         </button>
@@ -556,12 +729,12 @@ function App() {
         {help && (
           <div className="help">
             WASD move · Q/E rotate · Space jump · Hold F ascend · Ctrl descend ·
-            Shift dodge · Hold mouse button fire · R reload · Drones fire red
-            bolts: dodge them
+            Shift dodge · Hold mouse button fire · R reload · G repair (Support)
+            · Drones fire red bolts: dodge them
           </div>
         )}
       </div>
-      <RoomPanel network={network} />
+      <RoomPanel network={network} cls={cls} />
       <div className="crosshair">+</div>
       {hit > 0 && <div key={hit} className="hit-flash" aria-hidden="true" />}
       {hud?.down && (
@@ -572,7 +745,11 @@ function App() {
       )}
       <div className="mobile">
         <div className="pad">
-          {button("w", "▲")}
+          <div>
+            {button("q", "↺")}
+            {button("w", "▲")}
+            {button("e", "↻")}
+          </div>
           <div>
             {button("a", "◀")}
             {button("s", "▼")}
@@ -584,11 +761,13 @@ function App() {
           {button("f", "UP")}
           {button("control", "DOWN")}
           {button("shift", "DODGE")}
+          {button(" ", "JUMP")}
+          {classOf(cls).repair && button("g", "REPAIR")}
         </div>
       </div>
       <div className="footer">
         {network.status === "connected"
-          ? "PRIVATE ROOM · SQUAD DEFENSE · NO SAVED PROGRESS"
+          ? `PRIVATE ROOM · ${network.pvp ? "VERSUS" : "SQUAD DEFENSE"} · NO SAVED PROGRESS`
           : "SOLO PRACTICE · NO SAVED PROGRESS"}
       </div>
     </main>

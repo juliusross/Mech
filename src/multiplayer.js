@@ -15,6 +15,7 @@ export function useMultiplayer() {
   const socket = useRef(null);
   const lastSend = useRef(0);
   const shotListeners = useRef(new Set());
+  const eventListeners = useRef(new Set());
   const leave = useCallback(() => {
     const previous = socket.current;
     socket.current = null;
@@ -28,7 +29,7 @@ export function useMultiplayer() {
     },
     [],
   );
-  const connect = useCallback((type, name, room) => {
+  const connect = useCallback((type, name, room, options = {}) => {
     socket.current?.close();
     socket.current = null;
     if (!endpoint) {
@@ -59,7 +60,15 @@ export function useMultiplayer() {
       });
     }, 15000);
     ws.onopen = () =>
-      ws.send(JSON.stringify({ type, name, room: room.trim().toUpperCase() }));
+      ws.send(
+        JSON.stringify({
+          type,
+          name,
+          room: room.trim().toUpperCase(),
+          cls: options.cls,
+          pvp: Boolean(options.pvp),
+        }),
+      );
     ws.onmessage = (event) => {
       if (socket.current !== ws) return;
       let message;
@@ -81,9 +90,12 @@ export function useMultiplayer() {
           targets: [],
           wave: 1,
           cleared: false,
+          pvp: Boolean(message.pvp),
           error: "",
         });
       } else if (message.type === "snapshot") {
+        if (message.events?.length)
+          for (const listener of eventListeners.current) listener(message.events);
         setSession((old) => ({
           ...old,
           players: message.players,
@@ -146,6 +158,16 @@ export function useMultiplayer() {
     if (ws?.readyState === WebSocket.OPEN)
       ws.send(JSON.stringify({ type: "reload" }));
   }, []);
+  const send = useCallback((data) => {
+    const ws = socket.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(data));
+  }, []);
+  const sendClass = useCallback((cls) => send({ type: "class", cls }), [send]);
+  const sendRepair = useCallback(() => send({ type: "repair" }), [send]);
+  const onEvents = useCallback((listener) => {
+    eventListeners.current.add(listener);
+    return () => eventListeners.current.delete(listener);
+  }, []);
   const onShot = useCallback((listener) => {
     shotListeners.current.add(listener);
     return () => shotListeners.current.delete(listener);
@@ -154,6 +176,9 @@ export function useMultiplayer() {
     ...session,
     sendFire,
     sendReload,
+    sendClass,
+    sendRepair,
+    onEvents,
     onShot,
     available: Boolean(endpoint),
     connect,
