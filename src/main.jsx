@@ -15,10 +15,19 @@ import {
   BULLET_LIFE,
   hitsTarget,
 } from "../shared/arena.js";
+import {
+  createWorld,
+  createPilot,
+  fire,
+  step,
+  view,
+  MAX_ARMOR,
+} from "../shared/sim.js";
 const INITIAL_TARGETS = TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
-function Titan({ position, heading, color = "#e17b35" }) {
+function Titan({ position, heading, color = "#e17b35", down = false }) {
+  if (down) color = "#3a3f47";
   return (
-    <group position={position} rotation={[0, heading, 0]}>
+    <group position={position} rotation={[down ? -0.45 : 0, heading, 0]}>
       <mesh position={[0, 2.5, 0]} castShadow>
         <boxGeometry args={[2.2, 2.2, 1.35]} />
         <meshStandardMaterial color="#405775" metalness={0.7} roughness={0.3} />
@@ -81,36 +90,114 @@ function RemoteTitan({ pilot }) {
   });
   return (
     <group ref={group} position={initialPosition.current}>
-      <Titan position={[0, 0, 0]} heading={0} color={pilot.color} />
+      <Titan position={[0, 0, 0]} heading={0} color={pilot.color} down={pilot.down} />
       <Html position={[0, 5.3, 0]} center style={{ pointerEvents: "none" }}>
         <span className="pilot-label">{pilot.name}</span>
       </Html>
     </group>
   );
 }
-function Arena({ controls, mode, onStats, onAmmo, network }) {
+// Snapshot positions arrive 20 times a second; ease toward them every frame.
+function Follow({ p, rate = 18, children }) {
+  const group = useRef();
+  const first = useRef(p);
+  useFrame((_, dt) => {
+    group.current?.position.lerp(
+      new THREE.Vector3(...p),
+      1 - Math.exp(-rate * dt),
+    );
+  });
+  return (
+    <group ref={group} position={first.current}>
+      {children}
+    </group>
+  );
+}
+function Drone({ drone }) {
+  const body = useRef();
+  useFrame((state) => {
+    if (body.current) body.current.rotation.y = state.clock.elapsedTime * 2;
+  });
+  return (
+    <Follow p={drone.p} rate={12}>
+      <group ref={body}>
+        <mesh>
+          <octahedronGeometry args={[1.35, 0]} />
+          <meshStandardMaterial
+            color={drone.hp > 2 ? "#c24a63" : "#e38a3c"}
+            emissive={drone.hp > 2 ? "#4a0b1a" : "#5a2a08"}
+            emissiveIntensity={1.4}
+            metalness={0.5}
+            roughness={0.4}
+          />
+        </mesh>
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[1.8, 0.14, 6, 24]} />
+          <meshStandardMaterial
+            color="#ffc2cc"
+            emissive="#ff5a78"
+            emissiveIntensity={1.2}
+          />
+        </mesh>
+      </group>
+      <mesh>
+        <sphereGeometry args={[0.38, 10, 10]} />
+        <meshStandardMaterial
+          color="#ff3355"
+          emissive="#ff1e46"
+          emissiveIntensity={3}
+        />
+      </mesh>
+    </Follow>
+  );
+}
+function Bolt({ bolt }) {
+  return (
+    <Follow p={bolt.p} rate={30}>
+      <mesh>
+        <sphereGeometry args={[0.32, 8, 8]} />
+        <meshBasicMaterial color="#ff4a6a" />
+      </mesh>
+    </Follow>
+  );
+}
+function Arena({ controls, mode, onHud, onAmmo, network }) {
   const { camera } = useThree();
   const pos = useRef(new THREE.Vector3(...(network.spawn || [0, 0, 8])));
   const yaw = useRef(0);
   const velY = useRef(0);
   const [visual, setVisual] = useState([0, 0, 8]);
   const [angle, setAngle] = useState(0);
-  const targets = useRef(INITIAL_TARGETS.map((t) => ({ ...t })));
-  const [targetVisual, setTargetVisual] = useState(INITIAL_TARGETS);
   const bullets = useRef([]);
   const [bulletVisual, setBulletVisual] = useState([]);
   const cooldown = useRef(0);
   const ammo = useRef(60);
-  const destroyed = useRef(0);
   const dodge = useRef(0);
   const burst = useRef(0);
   const connected = network.status === "connected";
-  // In a room the server owns target health; local bullets are tracers only.
-  const shownTargets = connected
-    ? INITIAL_TARGETS.map((t, i) => ({ ...t, hp: network.targets[i] ?? 0 }))
-    : targetVisual;
-  const liveTargets = useRef(shownTargets);
-  liveTargets.current = shownTargets;
+  // Solo runs the shared simulation here; in a room the server runs it and
+  // local bullets are tracers only.
+  const solo = useRef(null);
+  if (!connected && !solo.current) solo.current = createWorld();
+  const me = useRef(createPilot(network.spawn || [0, 0, 8]));
+  const [soloScene, setSoloScene] = useState(() => solo.current && view(solo.current));
+  const scene = connected
+    ? {
+        targets: network.targets,
+        drones: network.drones || [],
+        bolts: network.bolts || [],
+        wave: network.wave ?? 1,
+        cleared: network.cleared,
+      }
+    : soloScene;
+  const shownTargets = INITIAL_TARGETS.map((t, i) => ({
+    ...t,
+    hp: scene.targets[i] ?? 0,
+  }));
+  const live = useRef({ targets: shownTargets, drones: scene.drones });
+  live.current = { targets: shownTargets, drones: scene.drones };
+  const wasDown = useRef(false);
+  const lastHud = useRef("");
   const { onShot } = network;
   useEffect(
     () =>
@@ -143,7 +230,18 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
   }, []);
   useFrame((_, dt0) => {
     const dt = Math.min(dt0, 0.05);
-    const k = controls.current;
+    const pilot = connected
+      ? network.players.find((p) => p.id === network.id)
+      : me.current;
+    const down = connected ? Boolean(pilot?.down) : me.current.downUntil > 0;
+    if (wasDown.current && !down) {
+      // Rebooted: return to this pilot's spawn point.
+      pos.current.set(...(connected ? network.spawn : me.current.spawn));
+      velY.current = 0;
+      bullets.current = [];
+    }
+    wasDown.current = down;
+    const k = down ? new Set() : controls.current;
     if (k.has("q")) yaw.current += 1.8 * dt;
     if (k.has("e")) yaw.current -= 1.8 * dt;
     const forward = new THREE.Vector3(
@@ -211,38 +309,56 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
             yaw.current,
           ),
         );
-      bullets.current.push({
-        id: Math.random(),
-        pos: origin,
-        dir: forward.clone(),
-        life: BULLET_LIFE,
-      });
-      if (connected) network.sendFire(origin.toArray(), forward.toArray());
-    }
-    bullets.current = bullets.current.filter((b) => {
-      b.pos.addScaledVector(b.dir, BULLET_SPEED * dt);
-      b.life -= dt;
       if (connected) {
-        if (liveTargets.current.some((t) => t.hp > 0 && hitsTarget(b.pos.toArray(), t)))
+        bullets.current.push({
+          id: Math.random(),
+          pos: origin,
+          dir: forward.clone(),
+          life: BULLET_LIFE,
+        });
+        network.sendFire(origin.toArray(), forward.toArray());
+      } else fire(solo.current, me.current, origin.toArray(), forward.toArray());
+    }
+    if (connected) {
+      bullets.current = bullets.current.filter((b) => {
+        b.pos.addScaledVector(b.dir, BULLET_SPEED * dt);
+        b.life -= dt;
+        const p = b.pos.toArray();
+        if (
+          live.current.targets.some((t) => t.hp > 0 && hitsTarget(p, t)) ||
+          live.current.drones.some(
+            (d) => Math.hypot(p[0] - d.p[0], p[1] - d.p[1], p[2] - d.p[2]) < 1.8,
+          )
+        )
           b.life = 0;
         return b.life > 0;
-      }
-      for (const t of targets.current) {
-        if (t.hp > 0 && hitsTarget(b.pos.toArray(), t)) {
-          t.hp--;
-          b.life = 0;
-          if (t.hp === 0) destroyed.current++;
-          setTargetVisual(targets.current.map((x) => ({ ...x })));
-          onStats(destroyed.current);
-          break;
-        }
-      }
-      return b.life > 0;
-    });
-    setBulletVisual(
-      bullets.current.map((b) => ({ id: b.id, pos: b.pos.toArray() })),
-    );
-    network.sendMovement(pos.current.toArray(), yaw.current);
+      });
+      setBulletVisual(
+        bullets.current.map((b) => ({ id: b.id, pos: b.pos.toArray() })),
+      );
+      network.sendMovement(pos.current.toArray(), yaw.current);
+    } else {
+      me.current.position = pos.current.toArray();
+      step(solo.current, [me.current], dt, performance.now());
+      setSoloScene(view(solo.current));
+      setBulletVisual(
+        solo.current.shots.map((s) => ({ id: s.id, pos: [...s.pos] })),
+      );
+    }
+    const hud = {
+      armor: pilot?.armor ?? MAX_ARMOR,
+      down,
+      score: pilot?.score ?? 0,
+      wave: scene.wave,
+      cleared: scene.cleared,
+      targetsDown: scene.targets.filter((hp) => hp === 0).length,
+      drones: scene.drones.length,
+    };
+    const key = JSON.stringify(hud);
+    if (key !== lastHud.current) {
+      lastHud.current = key;
+      onHud(hud);
+    }
     setVisual(pos.current.toArray());
     setAngle(yaw.current);
     const target = pos.current.clone().add(new THREE.Vector3(0, 3, 0));
@@ -269,7 +385,12 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
         <meshStandardMaterial color="#15283b" />
       </mesh>
       {mode !== 2 && (
-        <Titan position={visual} heading={angle} color={network.color} />
+        <Titan
+          position={visual}
+          heading={angle}
+          color={network.color}
+          down={wasDown.current}
+        />
       )}
       {network.players
         .filter((p) => p.id !== network.id)
@@ -299,6 +420,12 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
             </mesh>
           </group>
         ))}
+      {scene.drones.map((d) => (
+        <Drone key={d.id} drone={d} />
+      ))}
+      {scene.bolts.map((b) => (
+        <Bolt key={b.id} bolt={b} />
+      ))}
       {bulletVisual.map((b) => (
         <mesh key={b.id} position={b.pos}>
           <sphereGeometry args={[0.25, 8, 8]} />
@@ -318,16 +445,21 @@ function App() {
   const network = useMultiplayer();
   const controls = useRef(new Set());
   const [camera, setCamera] = useState(0);
-  const [kills, setKills] = useState(0);
   const [ammo, setAmmo] = useState(MAX_AMMO);
   const connected = network.status === "connected";
-  const me = network.players.find((p) => p.id === network.id);
-  const teamDown = network.targets.filter((hp) => hp === 0).length;
+  const [hud, setHud] = useState(null);
+  const [hit, setHit] = useState(0);
+  const lastArmor = useRef(MAX_ARMOR);
+  const onHud = (next) => {
+    if (next.armor < lastArmor.current) setHit((n) => n + 1);
+    lastArmor.current = next.armor;
+    setHud(next);
+  };
   const [help, setHelp] = useState(true);
   useEffect(() => {
     controls.current.clear();
-    setKills(0);
     setAmmo(MAX_AMMO);
+    lastArmor.current = MAX_ARMOR;
   }, [network.id]);
   useEffect(() => {
     const down = (e) => {
@@ -393,7 +525,7 @@ function App() {
           network={network}
           controls={controls}
           mode={camera}
-          onStats={setKills}
+          onHud={onHud}
           onAmmo={setAmmo}
         />
       </Canvas>
@@ -403,16 +535,18 @@ function App() {
         </strong>
         <small>TITAN 01 · TEST ARENA</small>
         <p>
-          {connected
-            ? network.cleared
-              ? `Wave ${network.wave} cleared · next wave incoming`
-              : `Wave ${network.wave} · Squad destroyed ${teamDown}/12 · You: ${me?.score ?? 0}`
-            : `Targets destroyed: ${kills}/12`}
+          {!hud
+            ? "Wave 1"
+            : hud.cleared
+              ? `Wave ${hud.wave} cleared · next wave incoming`
+              : `Wave ${hud.wave} · Targets ${hud.targetsDown}/12 · Drones left ${hud.drones}`}
         </p>
         <p>
-          Ammo: {ammo}/{MAX_AMMO} · R reload
+          Score: {hud?.score ?? 0} · Ammo: {ammo}/{MAX_AMMO} · R reload
         </p>
-        <p>Armor: 100% · Flight: Unlimited</p>
+        <p className={(hud?.armor ?? MAX_ARMOR) <= 30 ? "armor low" : "armor"}>
+          Armor: {hud?.armor ?? MAX_ARMOR}% · Flight: Unlimited
+        </p>
         <button onClick={() => setCamera((v) => (v + 1) % 3)}>
           Camera: {["Third-person", "Shoulder", "First-person"][camera]}
         </button>
@@ -422,12 +556,20 @@ function App() {
         {help && (
           <div className="help">
             WASD move · Q/E rotate · Space jump · Hold F ascend · Ctrl descend ·
-            Shift dodge · Hold mouse button fire · R reload
+            Shift dodge · Hold mouse button fire · R reload · Drones fire red
+            bolts: dodge them
           </div>
         )}
       </div>
       <RoomPanel network={network} />
       <div className="crosshair">+</div>
+      {hit > 0 && <div key={hit} className="hit-flash" aria-hidden="true" />}
+      {hud?.down && (
+        <div className="downed" role="status">
+          <strong>TITAN DOWN</strong>
+          <span>Rebooting at your spawn point…</span>
+        </div>
+      )}
       <div className="mobile">
         <div className="pad">
           {button("w", "▲")}
@@ -446,7 +588,7 @@ function App() {
       </div>
       <div className="footer">
         {network.status === "connected"
-          ? "PRIVATE ROOM · SQUAD TARGET RUN · NO SAVED PROGRESS"
+          ? "PRIVATE ROOM · SQUAD DEFENSE · NO SAVED PROGRESS"
           : "SOLO PRACTICE · NO SAVED PROGRESS"}
       </div>
     </main>

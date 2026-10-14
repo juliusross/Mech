@@ -1,21 +1,12 @@
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
-import {
-  TARGETS,
-  TARGET_HP,
-  MAX_AMMO,
-  FIRE_INTERVAL,
-  BULLET_SPEED,
-  BULLET_LIFE,
-  hitsTarget,
-} from "../shared/arena.js";
+import { MAX_AMMO, FIRE_INTERVAL } from "../shared/arena.js";
+import { createWorld, createPilot, fire, step, view } from "../shared/sim.js";
 
 const COLORS = ["#e17b35", "#45c7b8", "#c68af0", "#f0c653"];
 const CODE = /^[A-F0-9]{12}$/;
 const finite = Number.isFinite;
-const WAVE_DELAY = 4000;
-const freshTargets = () => TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
 
 export function createRoomServer({
   origins = ["http://127.0.0.1:5174", "http://localhost:5174"],
@@ -66,10 +57,10 @@ export function createRoomServer({
       heading: p.heading,
       ammo: p.ammo,
       score: p.score,
+      armor: p.armor,
+      down: Boolean(p.downUntil),
     })),
-    targets: room.targets.map((t) => t.hp),
-    wave: room.wave,
-    cleared: Boolean(room.waveAt),
+    ...view(room.world),
   });
   const broadcast = (room) => {
     const state = snapshot(room);
@@ -137,10 +128,7 @@ export function createRoomServer({
           room = {
             code,
             players: new Map(),
-            targets: freshTargets(),
-            shots: [],
-            wave: 1,
-            waveAt: 0,
+            world: createWorld(),
             dirty: true,
           };
           rooms.set(code, room);
@@ -161,16 +149,15 @@ export function createRoomServer({
         const occupied = new Set([...room.players.values()].map((p) => p.slot));
         const slot = [0, 1, 2, 3].find((n) => !occupied.has(n));
         player = {
+          ...createPilot([slot * 4, 0, 8]),
           id: randomUUID(),
           ws,
           slot,
           name: data.name.trim(),
           color: COLORS[slot],
-          position: [slot * 4, 0, 8],
           heading: 0,
           updatedAt: now,
           ammo: MAX_AMMO,
-          score: 0,
           firedAt: 0,
         };
         room.players.set(player.id, player);
@@ -183,6 +170,9 @@ export function createRoomServer({
           position: player.position,
         });
         broadcast(room);
+      } else if (player.downUntil) {
+        // A downed Titan cannot move or fire until it reboots at its spawn.
+        return;
       } else if (data.type === "move") {
         const p = data.position;
         if (
@@ -233,7 +223,7 @@ export function createRoomServer({
         player.ammo--;
         player.firedAt = now;
         const dir = d.map((v) => v / length);
-        room.shots.push({ by: player, pos: [...o], dir, life: BULLET_LIFE });
+        fire(room.world, player, o, dir);
         const shot = { type: "shot", by: player.id, origin: o, dir };
         for (const p of room.players.values()) if (p !== player) send(p.ws, shot);
         room.dirty = true;
@@ -250,41 +240,14 @@ export function createRoomServer({
       else broadcast(room);
     });
   });
-  const step = (room, dt, now) => {
-    if (room.waveAt && now >= room.waveAt) {
-      room.targets = freshTargets();
-      room.wave++;
-      room.waveAt = 0;
-      room.dirty = true;
-    }
-    if (!room.shots.length) return;
-    // Sub-steps keep 60 u/s bullets from tunnelling through 3.6 u targets.
-    const steps = 4,
-      h = dt / steps;
-    room.shots = room.shots.filter((s) => {
-      for (let i = 0; i < steps && s.life > 0; i++) {
-        for (let a = 0; a < 3; a++) s.pos[a] += s.dir[a] * BULLET_SPEED * h;
-        s.life -= h;
-        const t = room.targets.find((t) => t.hp > 0 && hitsTarget(s.pos, t));
-        if (t) {
-          t.hp--;
-          s.life = 0;
-          if (t.hp === 0 && room.players.has(s.by.id)) s.by.score++;
-          if (!room.waveAt && room.targets.every((t) => t.hp === 0))
-            room.waveAt = now + WAVE_DELAY;
-          room.dirty = true;
-        }
-      }
-      return s.life > 0;
-    });
-  };
   let last = Date.now();
   const tick = setInterval(() => {
     const now = Date.now(),
       dt = Math.min(0.1, (now - last) / 1000);
     last = now;
     for (const room of rooms.values()) {
-      step(room, dt, now);
+      const players = [...room.players.values()];
+      if (step(room.world, players, dt, now)) room.dirty = true;
       if (room.dirty) broadcast(room);
     }
   }, 50);

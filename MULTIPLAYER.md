@@ -1,5 +1,15 @@
 # Private-room multiplayer
 
+## Co-op drone milestone (October 14, 2026)
+
+- Hostile drones hunt the nearest active pilot, circle at range, and fire dodgeable red bolts (6 armor each). Wave N brings min(2 + N, 8) drones, each taking 4 hits; destroying one scores 2.
+- Armor is real now. At 0 a Titan goes down for 3 seconds (no moving or firing, drones ignore it), then reboots at full armor at its spawn point.
+- A wave clears only when all 12 targets and all drones are destroyed.
+- `shared/sim.js` holds the whole combat simulation. The room server runs one world per room, and solo practice runs the same code in the browser.
+- HUD: wave, targets, drones left, score, live armor (red at 30% or below), hit flash, and a TITAN DOWN overlay. The roster marks downed pilots.
+- Verified: 10 tests pass (4 new simulation tests). In the browser, drones attacked solo and in a two-pilot local room; down and reboot worked in both, and there were no console or server errors.
+- Not yet verified in the browser: destroying a drone by aiming manually (covered by tests).
+
 ## Shared combat milestone (October 14, 2026)
 
 - Everyone in a room fights the same 12 targets. The room server owns target health, simulates every shot, and credits the pilot who destroys each target.

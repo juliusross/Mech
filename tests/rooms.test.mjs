@@ -189,12 +189,13 @@ test("clearing every target starts the next wave", async (t) => {
   const a = await connect("create", "Gunner");
   const aw = await a.wait((m) => m.type === "welcome");
   const room = server.rooms.get(aw.room);
-  for (const target of room.targets) target.hp = 0;
-  room.targets[0].hp = 1;
+  for (const target of room.world.targets) target.hp = 0;
+  room.world.targets[0].hp = 1;
+  for (const drone of room.world.drones) drone.hp = 0;
   room.players.get(aw.id).position = [-13.5, 0, -5];
   a.send({ type: "fire", origin: [-13.5, 2.5, -6], dir: [0, 0, -1] });
   await a.wait((m) => m.type === "snapshot" && m.cleared);
-  room.waveAt = Date.now();
+  room.world.waveAt = Date.now();
   const next = await a.wait((m) => m.type === "snapshot" && m.wave === 2);
   assert.equal(next.cleared, false);
   assert.ok(next.targets.every((hp) => hp === 3));
