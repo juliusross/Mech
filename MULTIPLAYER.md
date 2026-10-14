@@ -1,5 +1,17 @@
 # Private-room multiplayer
 
+## Classes, versus, effects and phone layout (October 14, 2026)
+
+- Four mech classes, chosen in the HUD (remembered per browser, switchable any time except while down; switching keeps your armor percentage):
+  - Assault: 100 armor, balanced.
+  - Scout: 70 armor, fast, rapid fire, quick dodge, smaller.
+  - Heavy: 160 armor, slow, double-damage shots, larger.
+  - Support: 90 armor. G (or REPAIR on touch) repairs 30 armor for itself and pilots within 14 m, with a 10 s cooldown.
+- Versus rooms: tick "Versus" when creating a room. Pilot shots then damage other pilots (5 armor per damage point), and knocking a pilot down scores 5. Drones and targets are still in play. Co-op rooms are unchanged.
+- Effects: explosions when targets or drones are destroyed, sparks on hits, a green ring for repairs, and a red burst when a Titan goes down. The simulation emits these as events, which the server forwards in snapshots.
+- Touch controls gained turn left/right, jump, and repair. On phones the friends panel starts collapsed above the controls, and the controls help starts hidden.
+- Verified: 15 tests pass. In the browser: class switching and sizes, Support repair (+30, cooldown shown), a target explosion, a versus room where a Heavy knocked down an Assault (+5 score, roster shows down), and the phone layout at 375×812 (collapsed and expanded). No console errors.
+
 ## Co-op drone milestone (October 14, 2026)
 
 - Hostile drones hunt the nearest active pilot, circle at range, and fire dodgeable red bolts (6 armor each). Wave N brings min(2 + N, 8) drones, each taking 4 hits; destroying one scores 2.

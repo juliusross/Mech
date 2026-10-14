@@ -200,3 +200,33 @@ test("clearing every target starts the next wave", async (t) => {
   assert.equal(next.cleared, false);
   assert.ok(next.targets.every((hp) => hp === 3));
 });
+
+test("pilots choose classes, versus is set at creation, and support can repair", async (t) => {
+  const { connect, server } = await setup(t);
+  const a = await connect("create", "Medic");
+  a.ws.close();
+  const ws = new WebSocket(`ws://127.0.0.1:${server.http.address().port}/multiplayer`, { origin });
+  const q = [];
+  ws.on("message", (raw) => q.push(JSON.parse(raw)));
+  await once(ws, "open");
+  ws.send(JSON.stringify({ type: "create", name: "Medic", cls: "support", pvp: true }));
+  await new Promise((r) => setTimeout(r, 100));
+  const welcome = q.find((m) => m.type === "welcome");
+  assert.equal(welcome.pvp, true);
+  const room = server.rooms.get(welcome.room);
+  const me = room.players.get(welcome.id);
+  assert.equal(me.cls, "support");
+  me.armor = 20;
+  ws.send(JSON.stringify({ type: "repair" }));
+  await new Promise((r) => setTimeout(r, 120));
+  assert.equal(me.armor, 50);
+  assert.ok(q.some((m) => m.type === "snapshot" && m.events?.some((e) => e.kind === "repair")));
+  ws.send(JSON.stringify({ type: "class", cls: "heavy" }));
+  ws.send(JSON.stringify({ type: "class", cls: "wizard" }));
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(me.cls, "heavy");
+  const snap = q.findLast((m) => m.type === "snapshot");
+  assert.equal(snap.players[0].cls, "heavy");
+  assert.equal(snap.pvp, true);
+  ws.close();
+});

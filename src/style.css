@@ -87,7 +87,7 @@ button:hover {
 }
 .actions {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 8px;
   align-content: end;
 }
@@ -156,7 +156,7 @@ canvas {
   top: 20px;
   right: 20px;
   width: 280px;
-  max-height: calc(100vh - 210px);
+  max-height: calc(100vh - 190px);
   overflow: auto;
   background: #071321ed;
   border: 1px solid #2b5870;
@@ -284,5 +284,90 @@ button:focus-visible {
 @media (prefers-reduced-motion: reduce) {
   .hit-flash {
     animation-duration: 0.01s;
+  }
+}
+.class-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 4px;
+}
+.hud .class-picker button {
+  margin: 0;
+  padding: 6px 9px;
+}
+.class-picker button[aria-pressed="true"] {
+  background: #1e6b8f;
+  border-color: #82dfff;
+  color: #ffffff;
+}
+.class-picker button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.hud .class-blurb {
+  color: #a7c6d9;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.room-panel label.check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0 4px;
+}
+.room-panel label.check input {
+  width: auto;
+  margin: 0;
+}
+.pilot-class {
+  color: #9fb8c8;
+  font-size: 12px;
+}
+.room-panel h2 .room-toggle {
+  all: unset;
+  cursor: pointer;
+  display: block;
+  width: 100%;
+  font: inherit;
+}
+.room-panel h2 .room-toggle:focus-visible {
+  outline: 2px solid #82dfff;
+  outline-offset: 3px;
+}
+@media (max-width: 600px) {
+  .room-panel {
+    top: auto;
+    right: 8px;
+    bottom: 150px;
+    width: min(250px, calc(100vw - 16px));
+    max-height: calc(100vh - 170px);
+    padding: 9px 11px;
+  }
+  .room-panel h2 {
+    margin: 0;
+  }
+  .room-panel:has([aria-expanded="false"]) {
+    width: auto;
+  }
+  .room-panel:has([aria-expanded="true"]) {
+    z-index: 2;
+  }
+  .hud {
+    max-width: calc(100vw - 16px);
+  }
+  .hud p {
+    font-size: 12px;
+    margin: 4px 0;
+  }
+  .hud small {
+    margin-bottom: 8px;
+  }
+  .hud .class-picker button {
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+  .hud .class-blurb {
+    display: none;
   }
 }

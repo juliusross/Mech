@@ -1,10 +1,16 @@
 import React, { useState } from "react";
-export function RoomPanel({ network }) {
+import { CLASSES } from "../shared/arena.js";
+export function RoomPanel({ network, cls }) {
   const [name, setName] = useState("");
+  const [versus, setVersus] = useState(false);
   const [room, setRoom] = useState(
     () => new URLSearchParams(location.search).get("room") || "",
   );
   const [copyStatus, setCopyStatus] = useState("");
+  // Phones start collapsed so the arena stays visible, unless an invite was opened.
+  const [open, setOpen] = useState(
+    () => Boolean(room) || !matchMedia("(max-width: 600px)").matches,
+  );
   const busy = network.status === "connecting";
   const connected = network.status === "connected";
   const invite = new URL(location.href);
@@ -21,8 +27,22 @@ export function RoomPanel({ network }) {
   }
   return (
     <aside className="room-panel" aria-label="Private multiplayer room">
-      <h2>{connected ? "Your squad" : "Play with friends"}</h2>
-      <p className="room-note">Squad defense · Clear targets and drones together</p>
+      <h2>
+        <button
+          className="room-toggle"
+          aria-expanded={open || Boolean(network.error)}
+          onClick={() => setOpen((v) => !v)}
+        >
+          {connected ? `Your squad (${network.players.length}/4)` : "Play with friends"}
+          <span aria-hidden="true">{open ? " ▴" : " ▾"}</span>
+        </button>
+      </h2>
+      <div className="room-body" hidden={!open && !network.error}>
+      <p className="room-note">
+        {connected && network.pvp
+          ? "Versus · Pilots and drones can hit you"
+          : "Squad defense · Clear targets and drones together"}
+      </p>
       {network.error && (
         <p role="alert" className="room-error">
           {network.error}
@@ -35,7 +55,7 @@ export function RoomPanel({ network }) {
         <>
           <p>
             Room <strong>{network.room}</strong> · {network.players.length}/4
-            pilots
+            pilots · {network.pvp ? "Versus" : "Co-op"}
           </p>
           <ul>
             {network.players.map((p) => (
@@ -45,6 +65,7 @@ export function RoomPanel({ network }) {
                 </span>
                 {p.name}
                 {p.id === network.id ? " (you)" : ""}
+                <span className="pilot-class"> · {CLASSES[p.cls]?.name ?? "Assault"}</span>
                 {p.down ? " · down" : ""}
                 <span className="score">{p.score ?? 0}</span>
               </li>
@@ -73,7 +94,7 @@ export function RoomPanel({ network }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            network.connect("join", name, room);
+            network.connect("join", name, room, { cls });
           }}
         >
           <label>
@@ -88,10 +109,19 @@ export function RoomPanel({ network }) {
               required
             />
           </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={versus}
+              onChange={(e) => setVersus(e.target.checked)}
+              disabled={busy}
+            />
+            Versus: pilots can damage each other
+          </label>
           <button
             type="button"
             disabled={busy || !name.trim() || !network.available}
-            onClick={() => network.connect("create", name, "")}
+            onClick={() => network.connect("create", name, "", { cls, pvp: versus })}
           >
             Create private room
           </button>
@@ -127,6 +157,7 @@ export function RoomPanel({ network }) {
           )}
         </form>
       )}
+      </div>
     </aside>
   );
 }

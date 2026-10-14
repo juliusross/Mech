@@ -1,8 +1,17 @@
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
-import { MAX_AMMO, FIRE_INTERVAL } from "../shared/arena.js";
-import { createWorld, createPilot, fire, step, view } from "../shared/sim.js";
+import { MAX_AMMO, CLASSES, classOf } from "../shared/arena.js";
+import {
+  createWorld,
+  createPilot,
+  setClass,
+  fire,
+  repair,
+  step,
+  view,
+  drainEvents,
+} from "../shared/sim.js";
 
 const COLORS = ["#e17b35", "#45c7b8", "#c68af0", "#f0c653"];
 const CODE = /^[A-F0-9]{12}$/;
@@ -59,8 +68,10 @@ export function createRoomServer({
       score: p.score,
       armor: p.armor,
       down: Boolean(p.downUntil),
+      cls: p.cls,
     })),
     ...view(room.world),
+    events: drainEvents(room.world),
   });
   const broadcast = (room) => {
     const state = snapshot(room);
@@ -128,7 +139,7 @@ export function createRoomServer({
           room = {
             code,
             players: new Map(),
-            world: createWorld(),
+            world: createWorld(Math.random, { pvp: data.pvp === true }),
             dirty: true,
           };
           rooms.set(code, room);
@@ -149,7 +160,7 @@ export function createRoomServer({
         const occupied = new Set([...room.players.values()].map((p) => p.slot));
         const slot = [0, 1, 2, 3].find((n) => !occupied.has(n));
         player = {
-          ...createPilot([slot * 4, 0, 8]),
+          ...createPilot([slot * 4, 0, 8], CLASSES[data.cls] ? data.cls : "assault"),
           id: randomUUID(),
           ws,
           slot,
@@ -168,6 +179,7 @@ export function createRoomServer({
           room: room.code,
           color: player.color,
           position: player.position,
+          pvp: room.world.pvp,
         });
         broadcast(room);
       } else if (player.downUntil) {
@@ -218,7 +230,10 @@ export function createRoomServer({
         const length = Math.hypot(...d);
         if (length < 0.5 || length > 1.5) return;
         if (Math.hypot(...o.map((v, i) => v - player.position[i])) > 8) return;
-        if (player.ammo <= 0 || now - player.firedAt < FIRE_INTERVAL * 900)
+        if (
+          player.ammo <= 0 ||
+          now - player.firedAt < classOf(player.cls).fireInterval * 900
+        )
           return;
         player.ammo--;
         player.firedAt = now;
@@ -227,6 +242,13 @@ export function createRoomServer({
         const shot = { type: "shot", by: player.id, origin: o, dir };
         for (const p of room.players.values()) if (p !== player) send(p.ws, shot);
         room.dirty = true;
+      } else if (data.type === "class") {
+        if (!CLASSES[data.cls]) return;
+        setClass(player, data.cls);
+        room.dirty = true;
+      } else if (data.type === "repair") {
+        if (repair(room.world, player, [...room.players.values()], now))
+          room.dirty = true;
       } else if (data.type === "reload") {
         player.ammo = MAX_AMMO;
         room.dirty = true;
