@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: mechverse-rooms
+    runtime: node
+    plan: free
+    repo: https://github.com/juliusross/Mech
+    branch: multiplayer-movement
+    buildCommand: npm ci
+    startCommand: npm run server
+    healthCheckPath: /health
+    autoDeployTrigger: off
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: ALLOWED_ORIGINS
+        value: https://mech-five.vercel.app
