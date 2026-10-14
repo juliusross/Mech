@@ -239,3 +239,8 @@ button:focus-visible {
     padding: 7px;
   }
 }
+.room-panel li .score {
+  float: right;
+  font-variant-numeric: tabular-nums;
+  color: #9fdfff;
+}

@@ -1,4 +1,15 @@
-# Private-room movement milestone
+# Private-room multiplayer
+
+## Shared combat milestone (October 14, 2026)
+
+- Everyone in a room fights the same 12 targets. The room server owns target health, simulates every shot, and credits the pilot who destroys each target.
+- The server tracks each pilot's ammo (60, R reloads), enforces the fire rate, and ignores shots fired from away from the pilot's mech.
+- Every pilot sees every shot as a tracer. Local tracers stop at targets but never deal damage themselves.
+- Clearing all 12 targets starts the next wave after 4 seconds. The roster shows each pilot's score.
+- Verified: six server tests pass (two new: shared damage/scoring/ammo/fire-rate, and wave reset). In two browser sessions, one pilot destroyed a target and the other saw the squad count and score update. No console errors. Solo practice still works after leaving.
+- Not yet: pilot-vs-pilot damage, hit effects, online hosting.
+
+## Movement milestone
 
 Implemented locally, October 14, 2026. The public Vercel game remains the previously deployed solo version.
 
@@ -21,14 +32,13 @@ The current preview is loopback-only. Its invite links work on this Mac, not on 
 - Pilot names and roster, copyable invite link, room-full and missing-room errors.
 - Connection timeout, cancel, explicit leave, and disconnect fallback to solo.
 - Server-side origin checks, message-size and rate limits, bounded movement, heartbeat cleanup, and room limits.
-- Multiplayer weapons are explicitly offline. Solo firing, ammo, and destructible targets remain available.
 
 ## Verified
 
 - Two local browser sessions joined the same room; one visibly saw the other move and fly.
 - Leaving returned that session to solo and removed the remote pilot.
 - No browser warnings or errors were observed during those checks.
-- Four server integration tests pass: movement/room isolation/four-player cap/departure cleanup; invalid names/missing rooms/server capacity; malformed and out-of-bounds movement; origin rejection.
+- Four movement server integration tests pass: movement/room isolation/four-player cap/departure cleanup; invalid names/missing rooms/server capacity; malformed and out-of-bounds movement; origin rejection.
 - Production client build passes. The existing large JavaScript bundle warning remains.
 
 Four simultaneous browser sessions, different physical computers, high-latency connections, mobile devices, and automatic reconnection have not been validated in this milestone.
@@ -53,7 +63,7 @@ Frontend build setting:
 - Use a separate preview first, then test two computers before updating production.
 - No server credential is required in the frontend. The room code is the invitation secret; anyone with it can join until the room is full.
 
-Movement is client-predicted and relayed with sanity bounds. This is not yet an authoritative combat simulation or robust anti-cheat system. The next milestone is server-owned shots, damage, target state, and shared score.
+Movement is client-predicted and relayed with sanity bounds. Shots, damage, ammo, and score are server-owned. This is still not a robust anti-cheat system.
 
 ## Development
 

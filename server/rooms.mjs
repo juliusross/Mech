@@ -1,10 +1,21 @@
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
+import {
+  TARGETS,
+  TARGET_HP,
+  MAX_AMMO,
+  FIRE_INTERVAL,
+  BULLET_SPEED,
+  BULLET_LIFE,
+  hitsTarget,
+} from "../shared/arena.js";
 
 const COLORS = ["#e17b35", "#45c7b8", "#c68af0", "#f0c653"];
 const CODE = /^[A-F0-9]{12}$/;
 const finite = Number.isFinite;
+const WAVE_DELAY = 4000;
+const freshTargets = () => TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
 
 export function createRoomServer({
   origins = ["http://127.0.0.1:5174", "http://localhost:5174"],
@@ -53,7 +64,12 @@ export function createRoomServer({
       color: p.color,
       position: p.position,
       heading: p.heading,
+      ammo: p.ammo,
+      score: p.score,
     })),
+    targets: room.targets.map((t) => t.hp),
+    wave: room.wave,
+    cleared: Boolean(room.waveAt),
   });
   const broadcast = (room) => {
     const state = snapshot(room);
@@ -118,7 +134,15 @@ export function createRoomServer({
           do {
             code = randomBytes(6).toString("hex").toUpperCase();
           } while (rooms.has(code));
-          room = { code, players: new Map(), dirty: true };
+          room = {
+            code,
+            players: new Map(),
+            targets: freshTargets(),
+            shots: [],
+            wave: 1,
+            waveAt: 0,
+            dirty: true,
+          };
           rooms.set(code, room);
         } else {
           const code =
@@ -145,6 +169,9 @@ export function createRoomServer({
           position: [slot * 4, 0, 8],
           heading: 0,
           updatedAt: now,
+          ammo: MAX_AMMO,
+          score: 0,
+          firedAt: 0,
         };
         room.players.set(player.id, player);
         clearTimeout(joinTimer);
@@ -185,6 +212,34 @@ export function createRoomServer({
         );
         player.updatedAt = now;
         room.dirty = true;
+      } else if (data.type === "fire") {
+        // Shots are simulated here; clients only draw tracers.
+        const o = data.origin,
+          d = data.dir;
+        if (
+          !Array.isArray(o) ||
+          o.length !== 3 ||
+          !o.every(finite) ||
+          !Array.isArray(d) ||
+          d.length !== 3 ||
+          !d.every(finite)
+        )
+          return;
+        const length = Math.hypot(...d);
+        if (length < 0.5 || length > 1.5) return;
+        if (Math.hypot(...o.map((v, i) => v - player.position[i])) > 8) return;
+        if (player.ammo <= 0 || now - player.firedAt < FIRE_INTERVAL * 900)
+          return;
+        player.ammo--;
+        player.firedAt = now;
+        const dir = d.map((v) => v / length);
+        room.shots.push({ by: player, pos: [...o], dir, life: BULLET_LIFE });
+        const shot = { type: "shot", by: player.id, origin: o, dir };
+        for (const p of room.players.values()) if (p !== player) send(p.ws, shot);
+        room.dirty = true;
+      } else if (data.type === "reload") {
+        player.ammo = MAX_AMMO;
+        room.dirty = true;
       }
     });
     ws.on("close", () => {
@@ -195,8 +250,43 @@ export function createRoomServer({
       else broadcast(room);
     });
   });
+  const step = (room, dt, now) => {
+    if (room.waveAt && now >= room.waveAt) {
+      room.targets = freshTargets();
+      room.wave++;
+      room.waveAt = 0;
+      room.dirty = true;
+    }
+    if (!room.shots.length) return;
+    // Sub-steps keep 60 u/s bullets from tunnelling through 3.6 u targets.
+    const steps = 4,
+      h = dt / steps;
+    room.shots = room.shots.filter((s) => {
+      for (let i = 0; i < steps && s.life > 0; i++) {
+        for (let a = 0; a < 3; a++) s.pos[a] += s.dir[a] * BULLET_SPEED * h;
+        s.life -= h;
+        const t = room.targets.find((t) => t.hp > 0 && hitsTarget(s.pos, t));
+        if (t) {
+          t.hp--;
+          s.life = 0;
+          if (t.hp === 0 && room.players.has(s.by.id)) s.by.score++;
+          if (!room.waveAt && room.targets.every((t) => t.hp === 0))
+            room.waveAt = now + WAVE_DELAY;
+          room.dirty = true;
+        }
+      }
+      return s.life > 0;
+    });
+  };
+  let last = Date.now();
   const tick = setInterval(() => {
-    for (const room of rooms.values()) if (room.dirty) broadcast(room);
+    const now = Date.now(),
+      dt = Math.min(0.1, (now - last) / 1000);
+    last = now;
+    for (const room of rooms.values()) {
+      step(room, dt, now);
+      if (room.dirty) broadcast(room);
+    }
   }, 50);
   const heartbeat = setInterval(() => {
     for (const ws of wss.clients) {

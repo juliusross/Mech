@@ -146,3 +146,56 @@ test("unapproved origins are refused", async (t) => {
   response.resume();
   ws.terminate();
 });
+
+test("server-owned shots damage shared targets, score the destroyer, and respect ammo", async (t) => {
+  const { connect, server } = await setup(t);
+  const a = await connect("create", "Gunner");
+  const aw = await a.wait((m) => m.type === "welcome");
+  const b = await connect("join", "Spotter", aw.room);
+  await b.wait((m) => m.type === "welcome");
+  const room = server.rooms.get(aw.room);
+  const player = room.players.get(aw.id);
+  // Stand in front of target 1 (x = -4.5, z = -15) and fire three shots.
+  player.position = [-4.5, 0, -5];
+  for (let i = 0; i < 3; i++) {
+    a.send({ type: "fire", origin: [-4.5, 2.5, -6], dir: [0, 0, -1] });
+    await new Promise((r) => setTimeout(r, 170));
+  }
+  const tracer = await b.wait((m) => m.type === "shot");
+  assert.deepEqual(tracer.dir, [0, 0, -1]);
+  const done = await b.wait(
+    (m) => m.type === "snapshot" && m.targets[1] === 0,
+  );
+  assert.equal(done.players.find((p) => p.id === aw.id).score, 1);
+  assert.equal(done.players.find((p) => p.id === aw.id).ammo, 57);
+  // Rapid fire beyond the cooldown and shots from far away are ignored.
+  a.send({ type: "fire", origin: [-4.5, 2.5, -6], dir: [0, 0, -1] });
+  a.send({ type: "fire", origin: [-4.5, 2.5, -6], dir: [0, 0, -1] });
+  a.send({ type: "fire", origin: [40, 2.5, -6], dir: [0, 0, -1] });
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(player.ammo, 56);
+  player.ammo = 0;
+  await new Promise((r) => setTimeout(r, 170));
+  a.send({ type: "fire", origin: [-4.5, 2.5, -6], dir: [0, 0, -1] });
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(player.ammo, 0);
+  a.send({ type: "reload" });
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(player.ammo, 60);
+});
+
+test("clearing every target starts the next wave", async (t) => {
+  const { connect, server } = await setup(t);
+  const a = await connect("create", "Gunner");
+  const aw = await a.wait((m) => m.type === "welcome");
+  const room = server.rooms.get(aw.room);
+  for (const target of room.targets) target.hp = 0;
+  room.targets[0].hp = 1;
+  room.players.get(aw.id).position = [-13.5, 0, -5];
+  a.send({ type: "fire", origin: [-13.5, 2.5, -6], dir: [0, 0, -1] });
+  await a.wait((m) => m.type === "snapshot" && m.cleared);
+  room.waveAt = Date.now();
+  const next = await a.wait((m) => m.type === "snapshot" && m.wave === 2);
+  assert.equal(next.cleared, false);
+  assert.ok(next.targets.every((hp) => hp === 3));
+});

@@ -6,12 +6,16 @@ import "./style.css";
 import { Html } from "@react-three/drei";
 import { useMultiplayer } from "./multiplayer";
 import { RoomPanel } from "./RoomPanel";
-const INITIAL_TARGETS = Array.from({ length: 12 }, (_, i) => ({
-  id: i,
-  x: ((i % 4) - 1.5) * 9,
-  z: -15 - Math.floor(i / 4) * 12,
-  hp: 3,
-}));
+import {
+  TARGETS,
+  TARGET_HP,
+  MAX_AMMO,
+  FIRE_INTERVAL,
+  BULLET_SPEED,
+  BULLET_LIFE,
+  hitsTarget,
+} from "../shared/arena.js";
+const INITIAL_TARGETS = TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
 function Titan({ position, heading, color = "#e17b35" }) {
   return (
     <group position={position} rotation={[0, heading, 0]}>
@@ -100,6 +104,26 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
   const destroyed = useRef(0);
   const dodge = useRef(0);
   const burst = useRef(0);
+  const connected = network.status === "connected";
+  // In a room the server owns target health; local bullets are tracers only.
+  const shownTargets = connected
+    ? INITIAL_TARGETS.map((t, i) => ({ ...t, hp: network.targets[i] ?? 0 }))
+    : targetVisual;
+  const liveTargets = useRef(shownTargets);
+  liveTargets.current = shownTargets;
+  const { onShot } = network;
+  useEffect(
+    () =>
+      onShot((shot) =>
+        bullets.current.push({
+          id: Math.random(),
+          pos: new THREE.Vector3(...shot.origin),
+          dir: new THREE.Vector3(...shot.dir),
+          life: BULLET_LIFE,
+        }),
+      ),
+    [onShot],
+  );
   useEffect(() => {
     const handler = (e) => {
       if (
@@ -109,8 +133,9 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
         ) &&
         (e.key === "r" || e.key === "R")
       ) {
-        ammo.current = 60;
-        onAmmo(60);
+        ammo.current = MAX_AMMO;
+        onAmmo(MAX_AMMO);
+        network.sendReload();
       }
     };
     window.addEventListener("keydown", handler);
@@ -159,14 +184,25 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
     pos.current.z = THREE.MathUtils.clamp(pos.current.z, -85, 65);
     cooldown.current -= dt;
     if (
-      network.status !== "connected" &&
+      connected &&
+      !k.has("mouse") &&
+      cooldown.current < -0.4
+    ) {
+      // Settle any prediction drift once the trigger is released.
+      const mine = network.players.find((p) => p.id === network.id);
+      if (mine && mine.ammo !== ammo.current) {
+        ammo.current = mine.ammo;
+        onAmmo(mine.ammo);
+      }
+    }
+    if (
       k.has("mouse") &&
       cooldown.current <= 0 &&
       ammo.current > 0
     ) {
       ammo.current--;
       onAmmo(ammo.current);
-      cooldown.current = 0.16;
+      cooldown.current = FIRE_INTERVAL;
       const origin = pos.current
         .clone()
         .add(
@@ -179,19 +215,20 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
         id: Math.random(),
         pos: origin,
         dir: forward.clone(),
-        life: 2,
+        life: BULLET_LIFE,
       });
+      if (connected) network.sendFire(origin.toArray(), forward.toArray());
     }
     bullets.current = bullets.current.filter((b) => {
-      b.pos.addScaledVector(b.dir, 60 * dt);
+      b.pos.addScaledVector(b.dir, BULLET_SPEED * dt);
       b.life -= dt;
+      if (connected) {
+        if (liveTargets.current.some((t) => t.hp > 0 && hitsTarget(b.pos.toArray(), t)))
+          b.life = 0;
+        return b.life > 0;
+      }
       for (const t of targets.current) {
-        if (
-          t.hp > 0 &&
-          Math.abs(b.pos.x - t.x) < 2 &&
-          Math.abs(b.pos.z - t.z) < 1.8 &&
-          b.pos.y < 6
-        ) {
+        if (t.hp > 0 && hitsTarget(b.pos.toArray(), t)) {
           t.hp--;
           b.life = 0;
           if (t.hp === 0) destroyed.current++;
@@ -239,7 +276,7 @@ function Arena({ controls, mode, onStats, onAmmo, network }) {
         .map((p) => (
           <RemoteTitan key={p.id} pilot={p} />
         ))}
-      {targetVisual
+      {shownTargets
         .filter((t) => t.hp > 0)
         .map((t) => (
           <group key={t.id} position={[t.x, 0, t.z]}>
@@ -282,12 +319,15 @@ function App() {
   const controls = useRef(new Set());
   const [camera, setCamera] = useState(0);
   const [kills, setKills] = useState(0);
-  const [ammo, setAmmo] = useState(60);
+  const [ammo, setAmmo] = useState(MAX_AMMO);
+  const connected = network.status === "connected";
+  const me = network.players.find((p) => p.id === network.id);
+  const teamDown = network.targets.filter((hp) => hp === 0).length;
   const [help, setHelp] = useState(true);
   useEffect(() => {
     controls.current.clear();
     setKills(0);
-    setAmmo(60);
+    setAmmo(MAX_AMMO);
   }, [network.id]);
   useEffect(() => {
     const down = (e) => {
@@ -323,7 +363,6 @@ function App() {
   }, []);
   const button = (key, label) => (
     <button
-      disabled={key === "mouse" && network.status === "connected"}
       onPointerDown={(e) => {
         e.preventDefault();
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -364,11 +403,15 @@ function App() {
         </strong>
         <small>TITAN 01 · TEST ARENA</small>
         <p>
-          {network.status === "connected"
-            ? "Squad movement test · Weapons offline"
+          {connected
+            ? network.cleared
+              ? `Wave ${network.wave} cleared · next wave incoming`
+              : `Wave ${network.wave} · Squad destroyed ${teamDown}/12 · You: ${me?.score ?? 0}`
             : `Targets destroyed: ${kills}/12`}
         </p>
-        {network.status !== "connected" && <p>Ammo: {ammo}/60 · R reload</p>}
+        <p>
+          Ammo: {ammo}/{MAX_AMMO} · R reload
+        </p>
         <p>Armor: 100% · Flight: Unlimited</p>
         <button onClick={() => setCamera((v) => (v + 1) % 3)}>
           Camera: {["Third-person", "Shoulder", "First-person"][camera]}
@@ -379,9 +422,7 @@ function App() {
         {help && (
           <div className="help">
             WASD move · Q/E rotate · Space jump · Hold F ascend · Ctrl descend ·
-            Shift dodge
-            {network.status !== "connected" &&
-              " · Hold mouse button fire · R reload"}
+            Shift dodge · Hold mouse button fire · R reload
           </div>
         )}
       </div>
@@ -405,7 +446,7 @@ function App() {
       </div>
       <div className="footer">
         {network.status === "connected"
-          ? "PRIVATE ROOM · MOVEMENT TEST · NO SAVED PROGRESS"
+          ? "PRIVATE ROOM · SQUAD TARGET RUN · NO SAVED PROGRESS"
           : "SOLO PRACTICE · NO SAVED PROGRESS"}
       </div>
     </main>

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const initial = { status: "solo", players: [], error: "" };
+const initial = { status: "solo", players: [], targets: [], error: "" };
 const local = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 const endpoint =
   import.meta.env.VITE_MULTIPLAYER_URL ||
@@ -12,6 +12,7 @@ export function useMultiplayer() {
   const [session, setSession] = useState(initial);
   const socket = useRef(null);
   const lastSend = useRef(0);
+  const shotListeners = useRef(new Set());
   const leave = useCallback(() => {
     const previous = socket.current;
     socket.current = null;
@@ -75,10 +76,21 @@ export function useMultiplayer() {
           color: message.color,
           spawn: message.position,
           players: [],
+          targets: [],
+          wave: 1,
+          cleared: false,
           error: "",
         });
       } else if (message.type === "snapshot") {
-        setSession((old) => ({ ...old, players: message.players }));
+        setSession((old) => ({
+          ...old,
+          players: message.players,
+          targets: message.targets,
+          wave: message.wave,
+          cleared: message.cleared,
+        }));
+      } else if (message.type === "shot") {
+        for (const listener of shotListeners.current) listener(message);
       } else if (message.type === "error") {
         clearTimeout(timer);
         socket.current = null;
@@ -120,8 +132,25 @@ export function useMultiplayer() {
     lastSend.current = now;
     ws.send(JSON.stringify({ type: "move", position, heading }));
   }, []);
+  const sendFire = useCallback((origin, dir) => {
+    const ws = socket.current;
+    if (ws?.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ type: "fire", origin, dir }));
+  }, []);
+  const sendReload = useCallback(() => {
+    const ws = socket.current;
+    if (ws?.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ type: "reload" }));
+  }, []);
+  const onShot = useCallback((listener) => {
+    shotListeners.current.add(listener);
+    return () => shotListeners.current.delete(listener);
+  }, []);
   return {
     ...session,
+    sendFire,
+    sendReload,
+    onShot,
     available: Boolean(endpoint),
     connect,
     leave,
