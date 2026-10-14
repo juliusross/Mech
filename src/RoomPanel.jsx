@@ -22,7 +22,7 @@ export function RoomPanel({ network }) {
   return (
     <aside className="room-panel" aria-label="Private multiplayer room">
       <h2>{connected ? "Your squad" : "Play with friends"}</h2>
-      <p className="room-note">Squad target run · Clear waves together</p>
+      <p className="room-note">Squad defense · Clear targets and drones together</p>
       {network.error && (
         <p role="alert" className="room-error">
           {network.error}
@@ -45,6 +45,7 @@ export function RoomPanel({ network }) {
                 </span>
                 {p.name}
                 {p.id === network.id ? " (you)" : ""}
+                {p.down ? " · down" : ""}
                 <span className="score">{p.score ?? 0}</span>
               </li>
             ))}

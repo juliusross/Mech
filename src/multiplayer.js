@@ -88,6 +88,8 @@ export function useMultiplayer() {
           ...old,
           players: message.players,
           targets: message.targets,
+          drones: message.drones,
+          bolts: message.bolts,
           wave: message.wave,
           cleared: message.cleared,
         }));
