@@ -67,7 +67,7 @@ Four simultaneous browser sessions, different physical computers, high-latency c
 
 ## Online hosting
 
-Room server: https://mechverse-rooms.onrender.com (Render free plan, branch `multiplayer-movement`, manual deploys). Free instances sleep after ~15 idle minutes; the first connection then takes up to a minute. Deployed web builds connect to it by default; `VITE_MULTIPLAYER_URL` overrides that. To allow another site, add its exact origin to `ALLOWED_ORIGINS` in Render.
+Room server: https://mechverse-rooms.onrender.com (Render free plan). The repository's Render blueprint now selects `main`, which contains the merged co-op and versus features. The existing Render service must also be switched to `main` and deployed in its dashboard; changing this file alone does not update a running service. Free instances sleep after ~15 idle minutes, so the first connection may take up to a minute. Deployed web builds connect to this server by default; `VITE_MULTIPLAYER_URL` overrides that. To allow another site, add its exact origin to `ALLOWED_ORIGINS` in Render.
 
 ### Original preparation notes
 
@@ -98,4 +98,4 @@ npm test
 npm run build
 ```
 
-Work is on the `multiplayer-movement` branch. Online multiplayer has not been deployed. The existing Vercel production deployment follows `main`.
+The movement, shared combat, co-op drones, mech classes, and versus features have been merged into `main`. The Vercel production deployment follows `main`. Confirm the Render service's branch and successful deployment in its dashboard before treating the latest online multiplayer server as verified.

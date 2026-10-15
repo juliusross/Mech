@@ -44,8 +44,8 @@ Verified October 14, 2026:
 - The live page is publicly accessible without Vercel login.
 - Live browser checks passed for rendering, movement, firing, target destruction, all camera modes, and reloading. No browser console warnings or errors were observed.
 - The dashboard identifies main as the production branch; pushing to main updates this deployment.
-- The local repository tracks origin/main. The multiplayer-movement branch now contains the local multiplayer milestone described in MULTIPLAYER.md. Production still serves the solo source on main. Local setup notes and the original launcher's executable permission also differ from the uploaded version.
+- The local repository tracks origin/main. The movement, co-op, and versus changes have since been merged into main. See MULTIPLAYER.md for the current multiplayer setup and verification status.
 
 The local launcher remains usable on this Mac. A fresh GitHub clone may require `chmod +x "Start MECHVERSE.command"` before double-clicking the launcher, because browser upload did not preserve its executable permission.
 
-This deployment is still the single-player prototype. Sharing the link lets each person play separately; multiplayer is not implemented.
+The deployment checks above describe the original solo release. They do not verify the latest multiplayer deployment; check the current Vercel and Render dashboards for that status.

@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     repo: https://github.com/juliusross/Mech
-    branch: multiplayer-movement
+    branch: main
     buildCommand: npm ci
     startCommand: npm run server
     healthCheckPath: /health
