@@ -32,6 +32,7 @@ import {
 import { ENEMY_TYPES, waveRoster } from "./enemies.js";
 import { DROP_TYPES, POWERUPS } from "./powerups.js";
 import { terrainHeight, WORLD_EDGE } from "./terrain.js";
+import { solidsFor, solidAt, pushOut } from "./obstacles.js";
 
 export const MAX_ARMOR = 100;
 export const BOLT_DAMAGE = 6;
@@ -117,11 +118,12 @@ export function setClass(pilot, cls) {
 
 export function createWorld(
   random = Math.random,
-  { pvp = false, planet = "proving" } = {},
+  { pvp = false, planet = "proving", scatter = false } = {},
 ) {
   const world = {
     random,
     pvp,
+    scatter,
     planet: PLANETS[planet] ? planet : "proving",
     strikes: [],
     nextStrikeAt: 0,
@@ -137,6 +139,7 @@ export function createWorld(
     drops: [],
     events: [],
   };
+  world.solids = solidsFor(world.planet);
   startWave(world);
   return world;
 }
@@ -159,7 +162,7 @@ function spawnPoint(world, type, i, n) {
 }
 
 function startWave(world) {
-  world.targets = TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
+  world.targets = world.scatter ? scatterTargets(world) : TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
   world.enemies = [];
   let slot = 0;
   for (const [type, n] of Object.entries(waveRoster(world.wave)))
@@ -201,6 +204,28 @@ function shoot(world, e, target) {
     speed: T.boltSpeed,
     kind: T.bolt,
   });
+}
+
+// Arena edges for enemies and targets: wider than the original test range.
+export const FIELD = { x: 140, z0: -175, z1: 140 };
+
+/** Twelve targets at random open spots each wave, away from spawn and cover. */
+function scatterTargets(world) {
+  const r = world.random;
+  const lava = planetOf(world.planet).lava || [];
+  const out = [];
+  let guard = 2000;
+  while (out.length < TARGETS.length && guard-- > 0) {
+    const x = (r() - 0.5) * 200;
+    const z = -150 + r() * 210;
+    if (Math.hypot(x, z - 8) < 20) continue;
+    if (lava.some((l) => Math.hypot(x - l.x, z - l.z) < l.r + 3)) continue;
+    if (out.some((t) => Math.hypot(x - t.x, z - t.z) < 10)) continue;
+    // Keep a margin around structures so targets are never inside one.
+    if ([[0, 0], [2.5, 2.5], [-2.5, -2.5], [2.5, -2.5], [-2.5, 2.5]].some(([dx, dz]) => solidAt(world.solids, x + dx, 1, z + dz))) continue;
+    out.push({ id: out.length, x: Math.round(x * 10) / 10, z: Math.round(z * 10) / 10, hp: TARGET_HP });
+  }
+  return out;
 }
 
 const event = (world, kind, pos) =>
@@ -271,6 +296,7 @@ function laserHit(world, pilot, origin, dir, pilots) {
   // A short ray march is stable against network tick timing and thin targets.
   for (let range = 0; range <= 70; range += 0.75) {
     const p = origin.map((v, i) => v + dir[i] * range);
+    if (solidAt(world.solids, p[0], p[1], p[2])) { hitAt = range; break; }
     const target = world.targets.find((t) => t.hp > 0 && hitsTarget(p, t));
     const enemy = world.enemies.find((e) => e.hp > 0 && dist(p, centerOf(e)) < typeOf(e).radius);
     const rival = world.pvp && pilots.find((other) => other !== pilot && targetable(other) && dist(p, chest(other)) < PILOT_RADIUS * sizeOf(other));
@@ -534,8 +560,9 @@ export function step(world, pilots, dt, now) {
       for (let i = 0; i < 3; i++) e.pos[i] += ((goal[i] - e.pos[i]) / gap) * move;
       if (move > 0.01) e.heading = Math.atan2(-(goal[0] - e.pos[0]), -(goal[2] - e.pos[2]));
     }
-    e.pos[0] = clamp(e.pos[0], -65, 65);
-    e.pos[2] = clamp(e.pos[2], -85, 65);
+    [e.pos[0], e.pos[2]] = pushOut(world.solids, e.pos[0], e.pos[2], T.radius * 0.8, e.pos[1]);
+    e.pos[0] = clamp(e.pos[0], -FIELD.x, FIELD.x);
+    e.pos[2] = clamp(e.pos[2], FIELD.z0, FIELD.z1);
     e.aim = Math.atan2(-(target.position[0] - e.pos[0]), -(target.position[2] - e.pos[2]));
     if (gap < 1) e.heading = e.aim;
     if (e.burstLeft > 0) {
@@ -561,6 +588,11 @@ export function step(world, pilots, dt, now) {
     for (let i = 0; i < steps && b.life > 0; i++) {
       for (let a = 0; a < 3; a++) b.pos[a] += b.dir[a] * b.speed * h;
       b.life -= h;
+      if (solidAt(world.solids, b.pos[0], b.pos[1], b.pos[2])) {
+        event(world, "hit", b.pos);
+        b.life = 0;
+        break;
+      }
       const hit = alive.find(
         (p) => targetable(p) && dist(b.pos, chest(p)) < PILOT_RADIUS * sizeOf(p),
       );
@@ -580,6 +612,17 @@ export function step(world, pilots, dt, now) {
       for (let a = 0; a < 3; a++) s.pos[a] += s.dir[a] * (s.speed || BULLET_SPEED) * h;
       s.life -= h;
       const credit = pilots.includes(s.by);
+      // Structures are cover: shots stop on them (explosives still detonate).
+      if (solidAt(world.solids, s.pos[0], s.pos[1], s.pos[2])) {
+        event(world, "hit", s.pos);
+        if ((s.kind === "cannon" || s.kind === "rocket") && !s.exploded) {
+          s.exploded = true;
+          blast(world, s.pos, credit ? s.by : null, pilots);
+        }
+        s.life = 0;
+        changed = true;
+        break;
+      }
       const t = world.targets.find((t) => t.hp > 0 && hitsTarget(s.pos, t));
       const d =
         !t &&
@@ -636,6 +679,7 @@ const r2 = (v) => Math.round(v * 100) / 100;
 export function view(world) {
   return {
     targets: world.targets.map((t) => t.hp),
+    targetPos: world.targets.map((t) => [t.x, t.z]),
     enemies: world.enemies
       .filter((e) => e.hp > 0)
       .map((e) => ({ id: e.id, t: e.type, p: e.pos.map(r2), hp: e.hp, h: r2(e.heading), a: r2(e.aim) })),

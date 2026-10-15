@@ -4,6 +4,7 @@ import { WebSocket } from "ws";
 import { once } from "node:events";
 import { createRoomServer } from "../server/rooms.mjs";
 import { terrainHeight } from "../shared/terrain.js";
+import { TARGETS } from "../shared/arena.js";
 
 const origin = "http://127.0.0.1:5174";
 async function setup(t, options) {
@@ -218,6 +219,8 @@ test("server-owned shots damage shared targets, score the destroyer, and respect
   const b = await connect("join", "Spotter", aw.room);
   await b.wait((m) => m.type === "welcome");
   const room = server.rooms.get(aw.room);
+  // Rooms scatter targets randomly; use the fixed grid so shots are predictable.
+  room.world.targets = TARGETS.map((t) => ({ ...t, hp: 3 }));
   const player = room.players.get(aw.id);
   // Stand in front of target 1 (x = -4.5, z = -15) and fire three shots.
   player.position = [-4.5, 0, -5];
@@ -253,6 +256,8 @@ test("clearing every target starts the next wave", async (t) => {
   const a = await connect("create", "Gunner");
   const aw = await a.wait((m) => m.type === "welcome");
   const room = server.rooms.get(aw.room);
+  // Rooms scatter targets randomly; use the fixed grid so shots are predictable.
+  room.world.targets = TARGETS.map((t) => ({ ...t, hp: 3 }));
   for (const target of room.world.targets) target.hp = 0;
   room.world.targets[0].hp = 1;
   for (const enemy of room.world.enemies) enemy.hp = 0;

@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { CLASSES } from "../shared/arena.js";
 import { PLANETS, PLANET_IDS, planetOf } from "../shared/planets.js";
-export function RoomPanel({ network, settings, startOpen }) {
+export function RoomPanel({ network, settings, startOpen = true, onClose }) {
   const { cls, paint, weapon } = settings;
   const [name, setName] = useState(settings.name);
   const [versus, setVersus] = useState(false);
@@ -33,18 +33,16 @@ export function RoomPanel({ network, settings, startOpen }) {
     }
   }
   return (
-    <aside className="room-panel" aria-label="Private multiplayer room">
-      <h2>
-        <button
-          className="room-toggle"
-          aria-expanded={open || Boolean(network.error)}
-          onClick={() => setOpen((v) => !v)}
-        >
-          {connected ? `Your squad (${network.players.length}/4)` : "Play with friends"}
-          <span aria-hidden="true">{open ? " ▴" : " ▾"}</span>
-        </button>
+    <aside className="room-panel" role="dialog" aria-label="Private multiplayer room">
+      <h2 className="room-title">
+        {connected ? `Your squad (${network.players.length}/4)` : "Play with friends"}
+        {onClose && (
+          <button className="room-close" onClick={onClose} aria-label="Close">
+            ✕
+          </button>
+        )}
       </h2>
-      <div className="room-body" hidden={!open && !network.error}>
+      <div className="room-body">
       <p className="room-note">
         {connected && network.pvp
           ? "Versus · Pilots and enemies can hit you"

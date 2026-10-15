@@ -432,3 +432,48 @@ test("loadout weapons change damage, speed and explosions", () => {
   setWeapon(p, "laser-sword");
   assert.equal(p.weapon, "plasma", "unknown loadouts are ignored");
 });
+
+import { solidsFor, solidAt, pushOut, arenaStructures } from "../shared/obstacles.js";
+import { PLANET_IDS } from "../shared/planets.js";
+
+test("every planet has solid structures, including cover in the combat zone", () => {
+  for (const planet of PLANET_IDS) {
+    const solids = solidsFor(planet);
+    assert.ok(solids.boxes.length > 30, `${planet} has structures`);
+    const cover = arenaStructures(planet);
+    assert.ok(cover.length >= 15, `${planet} has arena cover`);
+    for (const c of cover) assert.ok(Math.hypot(c.x, c.z - 8) >= 22, "spawn stays clear");
+  }
+});
+
+test("scattered targets change each wave and never sit inside structures", () => {
+  const world = createWorld(Math.random, { scatter: true });
+  const first = world.targets.map((t) => `${t.x},${t.z}`).join(";");
+  assert.equal(world.targets.length, 12);
+  for (const t of world.targets) assert.equal(solidAt(world.solids, t.x, 1, t.z), null);
+  assert.equal(view(world).targetPos.length, 12);
+  world.waveAt = 1;
+  step(world, [], 0.05, 2);
+  assert.notEqual(world.targets.map((t) => `${t.x},${t.z}`).join(";"), first);
+});
+
+test("structures stop shots and enemy fire, and push movers out", () => {
+  const world = createWorld(fixed);
+  world.enemies = [];
+  world.targets = [];
+  const wall = world.solids.boxes.find((b) => !b.low && b.h > 3 && Math.abs((b.x0 + b.x1) / 2) < 140);
+  const cx = (wall.x0 + wall.x1) / 2,
+    cz = (wall.z0 + wall.z1) / 2;
+  const pilot = createPilot([cx, 0, wall.z1 + 12]);
+  fire(world, pilot, [cx, 1.5, wall.z1 + 6], [0, 0, -1]);
+  run(world, [pilot], 0.3);
+  assert.equal(world.shots.length, 0, "shot stopped at the wall");
+  assert.ok(drainEvents(world).some((e) => e.kind === "hit"));
+  world.bolts.push({ id: 9, pos: [cx, 1.5, wall.z0 - 6], dir: [0, 0, 1], life: 2, damage: 50, speed: 24 });
+  run(world, [pilot], 1);
+  assert.equal(pilot.armor, MAX_ARMOR, "pilot behind cover was not hit");
+  const [x, z] = pushOut(world.solids, cx, cz, 1.5, 0);
+  assert.equal(solidAt(world.solids, x, 1, z), null, "pushed outside");
+  const [fx, fz] = pushOut(world.solids, cx, cz, 1.5, wall.y0 + wall.h + 1);
+  assert.deepEqual([fx, fz], [cx, cz], "flying over is allowed");
+});

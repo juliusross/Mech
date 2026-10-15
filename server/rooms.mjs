@@ -165,6 +165,7 @@ export function createRoomServer({
             players: new Map(),
             world: createWorld(Math.random, {
               pvp: data.pvp === true,
+              scatter: true,
               planet: PLANETS[data.planet] ? data.planet : "proving",
             }),
             dirty: true,

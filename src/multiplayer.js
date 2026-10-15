@@ -105,6 +105,7 @@ export function useMultiplayer() {
           ...old,
           players: message.players,
           targets: message.targets,
+          targetPos: message.targetPos,
           enemies: message.enemies,
           bolts: message.bolts,
           drops: message.drops || [],

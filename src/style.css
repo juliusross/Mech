@@ -848,3 +848,42 @@ button:focus-visible {
 .weapon-card strong {
   font-size: 13px;
 }
+/* The friends panel now opens from the menus as a dialog above the game. */
+.room-panel {
+  z-index: 11;
+}
+.room-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.room-close {
+  padding: 4px 9px;
+  font-size: 14px;
+  line-height: 1;
+}
+@media (max-width: 600px) {
+  .room-panel {
+    top: 8px;
+    bottom: auto;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    max-height: calc(100vh - 16px);
+  }
+}
+/* Centred dialog with the game dimmed behind it (overrides earlier corner placement). */
+.room-panel,
+.room-panel:has([aria-expanded]) {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  right: auto;
+  bottom: auto;
+  transform: translate(-50%, -50%);
+  width: min(340px, calc(100vw - 24px));
+  max-height: calc(100vh - 40px);
+  z-index: 20;
+  box-shadow: 0 0 0 100vmax #050b14b0;
+}
