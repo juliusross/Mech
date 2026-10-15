@@ -4,6 +4,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { MAX_AMMO, CLASSES, classOf } from "../shared/arena.js";
 import { PLANETS, cleanPaint } from "../shared/planets.js";
 import { POWERUPS } from "../shared/powerups.js";
+import { terrainHeight, WORLD_EDGE } from "../shared/terrain.js";
 import {
   createWorld,
   createPilot,
@@ -212,7 +213,7 @@ export function createRoomServer({
         // A downed Titan cannot move or fire until it reboots at its spawn.
         return;
       } else if (data.type === "interact") {
-        if (toggleMech(player, player.heading)) {
+        if (toggleMech(player, player.heading, room.world.planet)) {
           player.updatedAt = now;
           room.dirty = true;
         }
@@ -230,12 +231,12 @@ export function createRoomServer({
         )
           return;
         if (
-          p[0] < -65 ||
-          p[0] > 65 ||
-          p[1] < 0 ||
-          p[1] > (player.onFoot ? 3.5 : 45) ||
-          p[2] < -85 ||
-          p[2] > 65
+          p[0] < -WORLD_EDGE ||
+          p[0] > WORLD_EDGE ||
+          p[2] < -WORLD_EDGE ||
+          p[2] > WORLD_EDGE ||
+          p[1] < terrainHeight(room.world.planet, p[0], p[2]) - 0.5 ||
+          p[1] > terrainHeight(room.world.planet, p[0], p[2]) + (player.onFoot ? 3.5 : 45) + 0.5
         )
           return;
         // Movement is client-predicted in this milestone; reject extreme jumps.

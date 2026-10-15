@@ -29,6 +29,7 @@ import {
 } from "./planets.js";
 import { ENEMY_TYPES, waveRoster } from "./enemies.js";
 import { DROP_TYPES, POWERUPS } from "./powerups.js";
+import { terrainHeight, WORLD_EDGE } from "./terrain.js";
 
 export const MAX_ARMOR = 100;
 export const BOLT_DAMAGE = 6;
@@ -78,21 +79,22 @@ export function createPilot(spawn, cls = "assault") {
 }
 
 /** The pilot can leave a landed Titan and re-enter it from nearby. */
-export function toggleMech(pilot, heading = 0) {
+export function toggleMech(pilot, heading = 0, planet = "proving") {
   if (pilot.downUntil || pilot.fusion) return false;
   if (pilot.onFoot) {
     if (dist(pilot.position, pilot.mechPosition) > 4.5) return false;
     pilot.position = [...pilot.mechPosition];
     pilot.onFoot = false;
   } else {
-    if (pilot.position[1] > 0.2) return false;
+    if (pilot.position[1] > terrainHeight(planet, pilot.position[0], pilot.position[2]) + 0.2) return false;
     pilot.mechPosition = [...pilot.position];
     pilot.mechHeading = heading;
     pilot.position = [
-      clamp(pilot.position[0] + Math.cos(heading) * 2.8, -65, 65),
+      clamp(pilot.position[0] + Math.cos(heading) * 2.8, -WORLD_EDGE, WORLD_EDGE),
       0,
-      clamp(pilot.position[2] - Math.sin(heading) * 2.8, -85, 65),
+      clamp(pilot.position[2] - Math.sin(heading) * 2.8, -WORLD_EDGE, WORLD_EDGE),
     ];
+    pilot.position[1] = terrainHeight(planet, pilot.position[0], pilot.position[2]);
     pilot.onFoot = true;
   }
   return true;
@@ -361,7 +363,7 @@ function endFusion(world, f, now, destroyed) {
     } else p.armor = Math.max(1, Math.round((f.armor * maxArmor(p)) / f.max));
   }
   const d = f.driver.position;
-  f.gunner.position = [Math.max(-65, Math.min(65, d[0] + 3.5)), d[1], d[2]];
+  f.gunner.position = [Math.max(-WORLD_EDGE, Math.min(WORLD_EDGE, d[0] + 3.5)), d[1], d[2]];
   event(world, destroyed ? "down" : "unfuse", chest(f.driver));
 }
 

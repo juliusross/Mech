@@ -23,6 +23,8 @@ import {
 import { Ocean, Lake, River, LavaRivers } from "./world/Water.jsx";
 import { Weather } from "./world/Weather.jsx";
 import { terrainMaps } from "./world/materials.js";
+import { terrainHeight } from "../shared/terrain.js";
+import { Instanced } from "./world/Instanced.jsx";
 
 const WEATHER = { ember: "ash", cryo: "snow", tempest: "rain", verdant: "drizzle" };
 
@@ -115,7 +117,7 @@ function Sun({ dir, color, intensity }) {
 function Ground({ a, b, planet }) {
   const maps = useMemo(() => terrainMaps(planet), [planet]);
   const geo = useMemo(() => {
-    const g = new THREE.PlaneGeometry(900, 900, 90, 90);
+    const g = new THREE.PlaneGeometry(900, 900, 225, 225);
     const ca = new THREE.Color(a),
       cb = new THREE.Color(b),
       c = new THREE.Color();
@@ -124,13 +126,17 @@ function Ground({ a, b, planet }) {
     for (let i = 0; i < p.count; i++) {
       const x = p.getX(i),
         y = p.getY(i);
+      const elevation = terrainHeight(planet, x, -y - 10);
+      p.setZ(i, elevation);
       const n = (Math.sin(x * 0.045) + Math.cos(y * 0.037) + Math.sin((x + y) * 0.021)) / 3;
-      c.copy(ca).lerp(cb, 0.5 + n * 0.5);
+      c.copy(ca).lerp(cb, Math.min(0.9, 0.5 + n * 0.3 + elevation * 0.007));
       colors.push(c.r, c.g, c.b);
     }
+    p.needsUpdate = true;
     g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    g.computeVertexNormals();
     return g;
-  }, [a, b]);
+  }, [a, b, planet]);
   useEffect(() => () => {
     geo.dispose();
     Object.values(maps).forEach((texture) => texture.dispose());
@@ -142,9 +148,41 @@ function Ground({ a, b, planet }) {
   );
 }
 
+function HillScenery({ planet, color }) {
+  const features = useMemo(() => {
+    const rocks = [], trees = [];
+    // Fixed positions keep the expanded map identical for every pilot.
+    for (let i = 0; i < 360; i++) {
+      const x = Math.sin(i * 127.1 + planet.length) * 378;
+      const z = Math.sin(i * 311.7 + 8.1) * 378;
+      if ((planet === "proving" && x > 115) || (planet === "verdant" && z > 195)) continue;
+      const y = terrainHeight(planet, x, z);
+      if (y < 3.5) continue;
+      const s = 0.8 + (i % 7) * 0.21;
+      if (i % 3 === 0 && ["proving", "cryo", "verdant"].includes(planet)) trees.push({ x, y, z, s });
+      else rocks.push({ x, y, z, s });
+    }
+    return { rocks, trees };
+  }, [planet]);
+  return <>
+    <Instanced items={features.rocks} place={(r) => ({ p: [r.x, r.y + r.s * 0.7, r.z], s: [r.s * 1.7, r.s, r.s * 1.4], r: [0.12, r.x, 0.18] })}>
+      <icosahedronGeometry args={[1, 1]} />
+      <meshStandardMaterial color={color} roughness={1} flatShading />
+    </Instanced>
+    <Instanced items={features.trees} place={(t) => ({ p: [t.x, t.y + t.s * 3.2, t.z], s: [t.s * 2, t.s * 4.8, t.s * 2] })}>
+      <coneGeometry args={[1, 1, 8]} />
+      <meshStandardMaterial color={planet === "cryo" ? "#3c665a" : "#315c37"} roughness={1} />
+    </Instanced>
+  </>;
+}
+
 const World = memo(function World({ planet }) {
   const P = planetOf(planet);
   const L = layoutFor(planet);
+  const vegetation = useMemo(() => {
+    const raised = (items = []) => items.map((item) => ({ ...item, elevation: terrainHeight(planet, item.x, item.z) }));
+    return { trees: raised(L.trees), bushes: raised(L.bushes), grass: raised(L.grass), rocks: raised(L.rocks) };
+  }, [L, planet]);
   const dusk = planet === "ember";
   return (
     <>
@@ -167,6 +205,7 @@ const World = memo(function World({ planet }) {
       <Sun dir={L.sun} color={P.sun} intensity={L.day ? 3.1 : dusk ? 1.6 : 0.9} />
       {planet === "selene" && <Stars radius={260} depth={60} count={3500} factor={6} fade />}
       <Ground a={L.ground} b={L.groundAlt} planet={planet} />
+      <HillScenery planet={planet} color={P.rock} />
       <Mountains
         color={planet === "cryo" ? "#c9d9e4" : planet === "verdant" ? "#2f4a33" : planet === "ember" ? "#24140f" : planet === "selene" ? "#46484f" : "#55646d"}
         snow={planet === "cryo" || planet === "proving"}
@@ -196,10 +235,10 @@ const World = memo(function World({ planet }) {
           ))}
         </>
       )}
-      <Trees trees={L.trees || []} snowy={planet === "cryo"} />
-      {L.bushes && <Bushes bushes={L.bushes} />}
-      {L.grass?.length > 0 && <Grass grass={L.grass} />}
-      <Rocks rocks={L.rocks || []} color={P.rock} />
+      <Trees trees={vegetation.trees} snowy={planet === "cryo"} />
+      {L.bushes && <Bushes bushes={vegetation.bushes} />}
+      {L.grass?.length > 0 && <Grass grass={vegetation.grass} />}
+      <Rocks rocks={vegetation.rocks} color={P.rock} />
       {L.cover && <Cover color={P.rock} />}
       {(P.lava || []).map((z, i) => (
         <Lava key={i} zone={z} />
