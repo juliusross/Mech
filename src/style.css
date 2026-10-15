@@ -51,6 +51,11 @@ button:hover {
   font-size: 13px;
   margin: 7px 0;
 }
+.hud .pilot-prompt {
+  color: #b8e4dd;
+  border-top: 1px solid #335967;
+  padding-top: 8px;
+}
 .hud button {
   font-size: 12px;
   margin: 6px 5px 0 0;

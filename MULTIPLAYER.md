@@ -1,5 +1,16 @@
 # Private-room multiplayer
 
+## Pilot, visual and weapon update
+
+- Press X when a Titan is landed to dismount. Walk with WASD, sprint with Shift, jump with Space, and press X beside the parked Titan to re-enter. The touch layout has EXIT/ENTER and RUN. On-foot pilots cannot fire Titan weapons, fly, repair, or fuse.
+- The server shares the pilot and parked Titan positions with other room members. Enter/exit and distance limits are validated by the server; solo play uses the same simulation rule.
+- Drones now have a quadrotor gunship body with rotors, skids, sensor and underslung weapon. Targets are rounded equipment pylons. Titan and enemy armor panels have softened edges, with fine procedural surface grain on Titan armor. Ground has generated color, roughness and normal maps; trees and mountains have softer silhouettes, and the arena grid is gone.
+- The scene uses a filtered environment reflection probe and existing sun/sky fill to soften metallic lighting. This gives some of the visual cues of bounced light; it is **not** full global illumination. The current world structures remain procedural, and solid collision with scenery, authored material sets, and high-detail art assets remain future work.
+- Combat hits throw sparks and brief flame, explosions leave smoke, and badly damaged machines smoke continuously. The particles use soft generated sprites and bounded instanced sparks.
+- Tanks and hostile mechs can randomly leave a shared pickup. The room server chooses the drop and awards it to the first nearby pilot. Shotgun, beam laser and explosive cannon use special charge; the sword expires after 20 seconds. Standard ammunition remains available when special charge runs out. Speed and armor-shield pickups are also in the pool.
+- The shotgun fires a short spread, the laser traces a focused beam, the cannon blasts nearby targets, and the sword slashes enemies in front with a stronger every-third strike. Versus damage remains limited to versus rooms. `?testweapon=shotgun|laser|cannon|sword` equips a test weapon in local Vite development only.
+- Verification: 29 automated room/simulation checks, production build, solo dismount/re-entry, a two-pilot Ember room with the remote pilot visible beside the parked Titan, and a local browser check of the laser and sword. Online rooms need the matching room-server deployment after this branch merges.
+
 ## Menus, planets, fusion, enemy roster and living worlds (October 15, 2026)
 
 - **Menus:** a main menu, a hangar (class cards with stat bars, rotating 3D preview, six paint presets plus three colour pickers), planet select, settings (name, volume, mouse sensitivity, invert Y) and a pause menu (Esc). Choices are saved per browser; the server receives class and paint so other pilots see them.

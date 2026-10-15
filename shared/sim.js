@@ -28,6 +28,7 @@ import {
   FUSE_DAMAGE,
 } from "./planets.js";
 import { ENEMY_TYPES, waveRoster } from "./enemies.js";
+import { DROP_TYPES, POWERUPS } from "./powerups.js";
 
 export const MAX_ARMOR = 100;
 export const BOLT_DAMAGE = 6;
@@ -47,6 +48,7 @@ export const maxArmor = (p) => classOf(p.cls).armor;
 const isGunner = (p) => p.fusion?.gunner === p;
 /** Hit-box scale: class size, enlarged while driving a fused Titan. */
 export function sizeOf(p) {
+  if (p.onFoot) return 0.32;
   return classOf(p.cls).scale * (p.fusion?.driver === p ? FUSE_SCALE : 1);
 }
 // A fused gunner rides inside the driver's Titan, so only the driver is hit.
@@ -56,6 +58,9 @@ export function createPilot(spawn, cls = "assault") {
   return {
     position: [...spawn],
     spawn: [...spawn],
+    mechPosition: [...spawn],
+    mechHeading: 0,
+    onFoot: false,
     cls: CLASSES[cls] ? cls : "assault",
     armor: classOf(cls).armor,
     downUntil: 0,
@@ -66,7 +71,31 @@ export function createPilot(spawn, cls = "assault") {
     fuseAt: null,
     fuseReadyAt: 0,
     burn: 0,
+    special: null,
+    speedUntil: 0,
+    shield: 0,
   };
+}
+
+/** The pilot can leave a landed Titan and re-enter it from nearby. */
+export function toggleMech(pilot, heading = 0) {
+  if (pilot.downUntil || pilot.fusion) return false;
+  if (pilot.onFoot) {
+    if (dist(pilot.position, pilot.mechPosition) > 4.5) return false;
+    pilot.position = [...pilot.mechPosition];
+    pilot.onFoot = false;
+  } else {
+    if (pilot.position[1] > 0.2) return false;
+    pilot.mechPosition = [...pilot.position];
+    pilot.mechHeading = heading;
+    pilot.position = [
+      clamp(pilot.position[0] + Math.cos(heading) * 2.8, -65, 65),
+      0,
+      clamp(pilot.position[2] - Math.sin(heading) * 2.8, -85, 65),
+    ];
+    pilot.onFoot = true;
+  }
+  return true;
 }
 
 export function setClass(pilot, cls) {
@@ -89,12 +118,14 @@ export function createWorld(
     nextStrikeAt: 0,
     fusions: [],
     nextId: 1,
+    now: 0,
     wave: 1,
     waveAt: 0,
     targets: [],
     enemies: [],
     bolts: [],
     shots: [],
+    drops: [],
     events: [],
   };
   startWave(world);
@@ -139,6 +170,7 @@ function startWave(world) {
       });
     }
   world.bolts = [];
+  world.drops = [];
 }
 
 function shoot(world, e, target) {
@@ -165,6 +197,65 @@ function shoot(world, e, target) {
 const event = (world, kind, pos) =>
   world.events.push({ id: world.nextId++, kind, p: pos.map((v) => Math.round(v * 100) / 100) });
 
+function dropFrom(world, enemy) {
+  if (enemy.type !== "tank" && enemy.type !== "mech") return;
+  if (world.random() >= 0.7) return;
+  const type = DROP_TYPES[Math.floor(world.random() * DROP_TYPES.length)];
+  world.drops.push({ id: world.nextId++, type, p: [enemy.pos[0], 1.1, enemy.pos[2]] });
+}
+
+function defeatEnemy(world, enemy, credit) {
+  if (credit) credit.score += typeOf(enemy).score;
+  event(world, "boom", centerOf(enemy));
+  dropFrom(world, enemy);
+}
+
+function hurtEnemy(world, enemy, amount, credit) {
+  if (enemy.hp <= 0) return;
+  enemy.hp = Math.max(0, enemy.hp - amount);
+  if (!enemy.hp) defeatEnemy(world, enemy, credit);
+}
+
+function hurtTarget(world, target, amount, credit) {
+  if (target.hp <= 0) return;
+  target.hp = Math.max(0, target.hp - amount);
+  if (!target.hp) {
+    if (credit) credit.score++;
+    event(world, "boom", [target.x, 1.8, target.z]);
+  }
+}
+
+function blast(world, pos, credit, pilots = []) {
+  for (const enemy of world.enemies)
+    if (enemy.hp > 0 && dist(pos, centerOf(enemy)) < 7) hurtEnemy(world, enemy, 3, credit);
+  for (const target of world.targets)
+    if (target.hp > 0 && Math.hypot(pos[0] - target.x, pos[2] - target.z) < 6)
+      hurtTarget(world, target, 2, credit);
+  if (world.pvp)
+    for (const rival of pilots)
+      if (rival !== credit && targetable(rival) && dist(pos, chest(rival)) < 7)
+        if (damagePilot(world, rival, 3 * PVP_DAMAGE, world.now) && credit) credit.score += PVP_KO_SCORE;
+  event(world, "boom", pos);
+}
+
+function laserHit(world, pilot, origin, dir, pilots) {
+  let hit = null;
+  let hitAt = 70;
+  // A short ray march is stable against network tick timing and thin targets.
+  for (let range = 0; range <= 70; range += 0.75) {
+    const p = origin.map((v, i) => v + dir[i] * range);
+    const target = world.targets.find((t) => t.hp > 0 && hitsTarget(p, t));
+    const enemy = world.enemies.find((e) => e.hp > 0 && dist(p, centerOf(e)) < typeOf(e).radius);
+    const rival = world.pvp && pilots.find((other) => other !== pilot && targetable(other) && dist(p, chest(other)) < PILOT_RADIUS * sizeOf(other));
+    if (target || enemy || rival) { hit = { target, enemy, rival, p }; hitAt = range; break; }
+  }
+  if (hit?.target) hurtTarget(world, hit.target, 1, pilot);
+  if (hit?.enemy) hurtEnemy(world, hit.enemy, 1, pilot);
+  if (hit?.rival && damagePilot(world, hit.rival, PVP_DAMAGE, world.now)) pilot.score += PVP_KO_SCORE;
+  const end = origin.map((v, i) => v + dir[i] * hitAt);
+  world.events.push({ id: world.nextId++, kind: "beam", p: origin.map((v) => Math.round(v * 100) / 100), q: end.map((v) => Math.round(v * 100) / 100) });
+}
+
 /** Returns and clears the effect events (hits, explosions, repairs, downs). */
 export function drainEvents(world) {
   const events = world.events;
@@ -172,20 +263,61 @@ export function drainEvents(world) {
   return events;
 }
 
-export function fire(world, pilot, origin, dir) {
-  world.shots.push({
-    id: world.nextId++,
-    by: pilot,
-    damage: classOf(pilot.cls).damage * (isGunner(pilot) ? FUSE_DAMAGE : 1),
-    pos: [...origin],
-    dir: [...dir],
-    life: BULLET_LIFE,
-  });
+export function fire(world, pilot, origin, dir, pilots = [pilot]) {
+  const weapon = pilot.special?.type;
+  const now = world.now || 0;
+  if (weapon === "sword" && now >= pilot.special.until) pilot.special = null;
+  const active = pilot.special?.type;
+  if (active === "sword") {
+    pilot.slashes = (pilot.slashes || 0) + 1;
+    const power = pilot.slashes % 3 === 0 ? 5 : 3;
+    for (const enemy of world.enemies) {
+      const offset = [enemy.pos[0] - pilot.position[0], enemy.pos[2] - pilot.position[2]];
+      if (enemy.hp > 0 && Math.hypot(...offset) < 7 && offset[0] * dir[0] + offset[1] * dir[2] > 0)
+        hurtEnemy(world, enemy, power, pilot);
+    }
+    for (const target of world.targets)
+      if (target.hp > 0 && Math.hypot(target.x - pilot.position[0], target.z - pilot.position[2]) < 6 && (target.x - pilot.position[0]) * dir[0] + (target.z - pilot.position[2]) * dir[2] > 0)
+        hurtTarget(world, target, power, pilot);
+    if (world.pvp)
+      for (const rival of pilots) {
+        const offset = [rival.position[0] - pilot.position[0], rival.position[2] - pilot.position[2]];
+        if (rival !== pilot && targetable(rival) && Math.hypot(...offset) < 7 && offset[0] * dir[0] + offset[1] * dir[2] > 0)
+          if (damagePilot(world, rival, power * PVP_DAMAGE, world.now)) pilot.score += PVP_KO_SCORE;
+      }
+    event(world, "slash", origin.map((v, i) => v + dir[i] * 3));
+    return "sword";
+  }
+  if (active === "laser") {
+    laserHit(world, pilot, origin, dir, pilots);
+    pilot.special.ammo -= 2;
+    if (pilot.special.ammo <= 0) pilot.special = null;
+    return "laser";
+  }
+  const damage = classOf(pilot.cls).damage * (isGunner(pilot) ? FUSE_DAMAGE : 1);
+  const shots = active === "shotgun" ? 8 : 1;
+  for (let i = 0; i < shots; i++) {
+    const spread = active === "shotgun" ? 0.13 : 0;
+    const direction = [dir[0] + (world.random() - 0.5) * 2 * spread, dir[1] + (world.random() - 0.5) * 2 * spread, dir[2] + (world.random() - 0.5) * 2 * spread];
+    const n = Math.hypot(...direction) || 1;
+    world.shots.push({
+      id: world.nextId++, by: pilot, damage: active === "shotgun" ? 1 : active === "cannon" ? 4 : damage,
+      pos: [...origin], dir: direction.map((v) => v / n),
+      life: active === "shotgun" ? 0.42 : BULLET_LIFE,
+      speed: active === "laser" ? 240 : active === "cannon" ? 34 : BULLET_SPEED,
+      kind: active || "normal",
+    });
+  }
+  if (active && active !== "sword") {
+    pilot.special.ammo--;
+    if (pilot.special.ammo <= 0) pilot.special = null;
+  }
+  return active || "normal";
 }
 
 /** Support pulse: repairs the caster and every active pilot in range. */
 export function repair(world, pilot, pilots, now) {
-  if (!classOf(pilot.cls).repair || pilot.downUntil || now < pilot.repairAt)
+  if (!classOf(pilot.cls).repair || pilot.onFoot || pilot.downUntil || now < pilot.repairAt)
     return false;
   pilot.repairAt = now + REPAIR_COOLDOWN * 1000;
   for (const p of pilots)
@@ -197,7 +329,7 @@ export function repair(world, pilot, pilots, now) {
 
 /** Asks to fuse; two requests from nearby pilots within a few seconds pair up. */
 export function requestFuse(world, pilot, now) {
-  if (pilot.fusion || pilot.downUntil || now < pilot.fuseReadyAt) return false;
+  if (pilot.onFoot || pilot.fusion || pilot.downUntil || now < pilot.fuseReadyAt) return false;
   pilot.fuseAt = now;
   return true;
 }
@@ -241,7 +373,9 @@ function damagePilot(world, p, amount, now) {
     endFusion(world, f, now, true);
     return true;
   }
-  p.armor = Math.max(0, p.armor - amount);
+  const blocked = Math.min(p.shield || 0, amount);
+  p.shield = Math.max(0, (p.shield || 0) - blocked);
+  p.armor = Math.max(0, p.armor - (amount - blocked));
   if (p.armor) return false;
   p.downUntil = now + RESPAWN_MS;
   event(world, "down", chest(p));
@@ -249,7 +383,23 @@ function damagePilot(world, p, amount, now) {
 }
 
 export function step(world, pilots, dt, now) {
+  world.now = now;
   let changed = false;
+  for (const p of pilots) {
+    if (p.special?.type === "sword" && now >= p.special.until) { p.special = null; changed = true; }
+    if (p.speedUntil && now >= p.speedUntil) { p.speedUntil = 0; changed = true; }
+    if (p.downUntil) continue;
+    const index = world.drops.findIndex((drop) => dist(p.position, drop.p) < 3.8);
+    if (index >= 0) {
+      const [drop] = world.drops.splice(index, 1);
+      const power = POWERUPS[drop.type];
+      if (drop.type === "speed") p.speedUntil = now + power.duration;
+      else if (drop.type === "armor") p.shield = Math.max(p.shield, power.shield);
+      else p.special = { type: drop.type, ammo: power.ammo || 0, until: power.duration ? now + power.duration : 0 };
+      event(world, "pickup", drop.p);
+      changed = true;
+    }
+  }
   if (world.waveAt && now >= world.waveAt) {
     world.wave++;
     world.waveAt = 0;
@@ -261,6 +411,8 @@ export function step(world, pilots, dt, now) {
       p.downUntil = 0;
       p.armor = maxArmor(p);
       p.position = [...p.spawn];
+      p.mechPosition = [...p.spawn];
+      p.onFoot = false;
       p.respawns++;
       changed = true;
     }
@@ -321,7 +473,7 @@ export function step(world, pilots, dt, now) {
         if (!p.downUntil && Math.hypot(p.position[0] - st.p[0], p.position[2] - st.p[2]) < STRIKE_RADIUS)
           damagePilot(world, p, STRIKE_DAMAGE, now);
       for (const e of world.enemies)
-        if (e.hp > 0 && Math.hypot(e.pos[0] - st.p[0], e.pos[2] - st.p[2]) < STRIKE_RADIUS) e.hp = Math.max(0, e.hp - 2);
+        if (e.hp > 0 && Math.hypot(e.pos[0] - st.p[0], e.pos[2] - st.p[2]) < STRIKE_RADIUS) hurtEnemy(world, e, 2, null);
       event(world, "strike", st.p);
       changed = true;
       return false;
@@ -396,7 +548,7 @@ export function step(world, pilots, dt, now) {
   // Sub-steps keep 60 u/s bullets from tunnelling through targets and enemies.
   world.shots = world.shots.filter((s) => {
     for (let i = 0; i < steps && s.life > 0; i++) {
-      for (let a = 0; a < 3; a++) s.pos[a] += s.dir[a] * BULLET_SPEED * h;
+      for (let a = 0; a < 3; a++) s.pos[a] += s.dir[a] * (s.speed || BULLET_SPEED) * h;
       s.life -= h;
       const credit = pilots.includes(s.by);
       const t = world.targets.find((t) => t.hp > 0 && hitsTarget(s.pos, t));
@@ -415,26 +567,26 @@ export function step(world, pilots, dt, now) {
             dist(s.pos, chest(p)) < PILOT_RADIUS * sizeOf(p),
         );
       if (t) {
-        t.hp = Math.max(0, t.hp - s.damage);
-        if (!t.hp) {
-          if (credit) s.by.score++;
-          event(world, "boom", [t.x, 1.8, t.z]);
-        }
+        hurtTarget(world, t, s.damage, credit ? s.by : null);
       } else if (d) {
-        d.hp = Math.max(0, d.hp - s.damage);
-        if (!d.hp) {
-          if (credit) s.by.score += typeOf(d).score;
-          event(world, "boom", centerOf(d));
-        }
+        hurtEnemy(world, d, s.damage, credit ? s.by : null);
       } else if (rival) {
         if (damagePilot(world, rival, s.damage * PVP_DAMAGE, now) && credit)
           s.by.score += PVP_KO_SCORE;
       }
       if (t || d || rival) {
         if (!(t && !t.hp) && !(d && !d.hp)) event(world, "hit", s.pos);
+        if (s.kind === "cannon") {
+          s.exploded = true;
+          blast(world, s.pos, credit ? s.by : null, pilots);
+        }
         s.life = 0;
         changed = true;
       }
+    }
+    if (s.kind === "cannon" && s.life <= 0 && !s.exploded) {
+      s.exploded = true;
+      blast(world, s.pos, pilots.includes(s.by) ? s.by : null, pilots);
     }
     return s.life > 0;
   });
@@ -459,6 +611,7 @@ export function view(world) {
       .filter((e) => e.hp > 0)
       .map((e) => ({ id: e.id, t: e.type, p: e.pos.map(r2), hp: e.hp, h: r2(e.heading), a: r2(e.aim) })),
     bolts: world.bolts.map((b) => ({ id: b.id, p: b.pos.map(r2), k: b.kind })),
+    drops: world.drops.map((d) => ({ id: d.id, type: d.type, p: d.p.map(r2) })),
     wave: world.wave,
     cleared: Boolean(world.waveAt),
     pvp: world.pvp,

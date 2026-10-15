@@ -284,7 +284,9 @@ export function Settings({ settings, update, onBack }) {
           <dt>Space / F / Ctrl</dt>
           <dd>Jump / thrust up / descend</dd>
           <dt>Shift</dt>
-          <dd>Dodge</dd>
+          <dd>Dodge in a Titan · sprint on foot</dd>
+          <dt>X</dt>
+          <dd>Exit a landed Titan · enter your Titan when nearby</dd>
           <dt>R · G · V</dt>
           <dd>Reload · Repair (Support) · Fuse with a nearby squadmate</dd>
           <dt>Touch</dt>

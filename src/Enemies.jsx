@@ -4,7 +4,9 @@ import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import { Drone } from "./Combat.jsx";
 import { Mech } from "./Mech.jsx";
+import { RoundedGeometry } from "./RoundedPart.jsx";
 import { ENEMY_TYPES } from "../shared/enemies.js";
+import { DamageSmoke } from "./DamageEffects.jsx";
 
 const ENEMY_PAINT = { primary: "#6e1f24", secondary: "#24272d", visor: "#ff3b3b" };
 const turn = (from, to, k) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from)) * k;
@@ -29,7 +31,7 @@ function Mover({ e, rate = 10, children }) {
 function Box({ size, position, color, rotation, metal = 0.5, rough = 0.55, glow }) {
   return (
     <mesh position={position} rotation={rotation} castShadow receiveShadow>
-      <boxGeometry args={size} />
+      <RoundedGeometry size={size} radius={0.1} />
       <meshStandardMaterial
         color={color}
         metalness={metal}
@@ -160,6 +162,9 @@ export function Enemy({ e }) {
         <group scale={0.95}>
           <Mech cls="assault" paint={ENEMY_PAINT} />
         </group>
+      )}
+      {e.t !== "soldier" && e.hp / T.hp <= 0.5 && (
+        <DamageSmoke severity={1 - e.hp / T.hp} position={[0, T.center * 1.7 + 0.5, 0]} />
       )}
       {e.hp < T.hp && (
         // Damage indicator: a thin bar above the enemy.

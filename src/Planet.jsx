@@ -1,7 +1,8 @@
-import React, { memo, useMemo, useRef } from "react";
+import React, { memo, useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Sky, Stars } from "@react-three/drei";
 import * as THREE from "three";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { planetOf, STRIKE_RADIUS } from "../shared/planets.js";
 import { layoutFor } from "./world/layout.js";
 import { Trees, Bushes, Grass, Rocks } from "./world/Vegetation.jsx";
@@ -21,8 +22,27 @@ import {
 } from "./world/Structures.jsx";
 import { Ocean, Lake, River, LavaRivers } from "./world/Water.jsx";
 import { Weather } from "./world/Weather.jsx";
+import { terrainMaps } from "./world/materials.js";
 
 const WEATHER = { ember: "ash", cryo: "snow", tempest: "rain", verdant: "drizzle" };
+
+function Reflections({ planet }) {
+  const { gl, scene } = useThree();
+  useEffect(() => {
+    const generator = new THREE.PMREMGenerator(gl);
+    const room = new RoomEnvironment();
+    const env = generator.fromScene(room, 0.04);
+    scene.environment = env.texture;
+    scene.environmentIntensity = planet === "ember" ? 0.4 : 0.55;
+    return () => {
+      scene.environment = null;
+      env.dispose();
+      room.dispose();
+      generator.dispose();
+    };
+  }, [gl, scene, planet]);
+  return null;
+}
 
 function Lava({ zone }) {
   const mat = useRef();
@@ -92,7 +112,8 @@ function Sun({ dir, color, intensity }) {
   );
 }
 
-function Ground({ a, b }) {
+function Ground({ a, b, planet }) {
+  const maps = useMemo(() => terrainMaps(planet), [planet]);
   const geo = useMemo(() => {
     const g = new THREE.PlaneGeometry(900, 900, 90, 90);
     const ca = new THREE.Color(a),
@@ -110,9 +131,13 @@ function Ground({ a, b }) {
     g.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
     return g;
   }, [a, b]);
+  useEffect(() => () => {
+    geo.dispose();
+    Object.values(maps).forEach((texture) => texture.dispose());
+  }, [geo, maps]);
   return (
     <mesh geometry={geo} rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.02, -10]} receiveShadow>
-      <meshStandardMaterial vertexColors roughness={0.95} metalness={0.02} />
+      <meshStandardMaterial vertexColors map={maps.map} roughnessMap={maps.roughnessMap} normalMap={maps.normalMap} normalScale={[0.35, 0.35]} roughness={1} metalness={0.02} />
     </mesh>
   );
 }
@@ -123,6 +148,7 @@ const World = memo(function World({ planet }) {
   const dusk = planet === "ember";
   return (
     <>
+      <Reflections planet={planet} />
       {L.day ? (
         <Sky
           distance={4500}
@@ -140,8 +166,7 @@ const World = memo(function World({ planet }) {
       <ambientLight intensity={L.day ? 0.25 : P.ambient * 0.3} />
       <Sun dir={L.sun} color={P.sun} intensity={L.day ? 3.1 : dusk ? 1.6 : 0.9} />
       {planet === "selene" && <Stars radius={260} depth={60} count={3500} factor={6} fade />}
-      <Ground a={L.ground} b={L.groundAlt} />
-      <gridHelper args={[136, 34, P.grid[0], P.grid[1]]} position={[0, 0.02, -10]} />
+      <Ground a={L.ground} b={L.groundAlt} planet={planet} />
       <Mountains
         color={planet === "cryo" ? "#c9d9e4" : planet === "verdant" ? "#2f4a33" : planet === "ember" ? "#24140f" : planet === "selene" ? "#46484f" : "#55646d"}
         snow={planet === "cryo" || planet === "proving"}

@@ -1,6 +1,6 @@
 # MECHVERSE — Prototype 0.1
 
-A playable single-player 3D mech test arena built with React, React Three Fiber, Three.js, and Vite. The robot is procedurally assembled from primitive geometry, so no asset downloads are needed.
+A playable 3D mech game with solo missions and four-player private rooms, built with React, React Three Fiber, Three.js, and Vite. See [MULTIPLAYER.md](MULTIPLAYER.md) for the current controls, server setup and feature status.
 
 ## Run locally
 
@@ -40,7 +40,7 @@ npm run preview
 3. Connect the GitHub repository to Vercel (or Netlify).
 4. Build command: `npm run build`. Output directory: `dist`.
 
-This is a client-only prototype. Multiplayer, gamepad mapping, robust mobile controls, persistence, authoritative combat, and fusion are future phases. The visuals are placeholder geometry, not production assets.
+The browser client deploys to Vercel. Private rooms require the matching Node room server; see [MULTIPLAYER.md](MULTIPLAYER.md). The art is still procedural and subject to further polish.
 
 ## Mac setup
 

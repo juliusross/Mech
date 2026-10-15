@@ -3,9 +3,11 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { MAX_AMMO, CLASSES, classOf } from "../shared/arena.js";
 import { PLANETS, cleanPaint } from "../shared/planets.js";
+import { POWERUPS } from "../shared/powerups.js";
 import {
   createWorld,
   createPilot,
+  toggleMech,
   setClass,
   fire,
   repair,
@@ -66,9 +68,15 @@ export function createRoomServer({
       color: p.color,
       position: p.position,
       heading: p.heading,
+      onFoot: p.onFoot,
+      mechPosition: p.mechPosition,
+      mechHeading: p.mechHeading,
       ammo: p.ammo,
       score: p.score,
       armor: p.armor,
+      shield: p.shield,
+      speedUntil: Math.max(0, p.speedUntil - Date.now()),
+      special: p.special ? { ...p.special, until: Math.max(0, p.special.until - Date.now()) } : null,
       down: Boolean(p.downUntil),
       cls: p.cls,
       paint: p.paint,
@@ -203,6 +211,11 @@ export function createRoomServer({
       } else if (player.downUntil) {
         // A downed Titan cannot move or fire until it reboots at its spawn.
         return;
+      } else if (data.type === "interact") {
+        if (toggleMech(player, player.heading)) {
+          player.updatedAt = now;
+          room.dirty = true;
+        }
       } else if (data.type === "move" && player.fusion?.gunner === player) {
         // The gunner rides inside the driver's Titan; only its aim matters.
         if (Number.isFinite(data.heading)) player.heading = data.heading;
@@ -220,23 +233,28 @@ export function createRoomServer({
           p[0] < -65 ||
           p[0] > 65 ||
           p[1] < 0 ||
-          p[1] > 45 ||
+          p[1] > (player.onFoot ? 3.5 : 45) ||
           p[2] < -85 ||
           p[2] > 65
         )
           return;
         // Movement is client-predicted in this milestone; reject extreme jumps.
         const distance = Math.hypot(...p.map((v, i) => v - player.position[i]));
-        if (distance > 60 * Math.min(2, (now - player.updatedAt) / 1000) + 2)
+        if (distance > (player.onFoot ? 14 : 60) * Math.min(2, (now - player.updatedAt) / 1000) + 2)
           return;
         player.position = p;
         player.heading = Math.atan2(
           Math.sin(data.heading),
           Math.cos(data.heading),
         );
+        if (!player.onFoot) {
+          player.mechPosition = [...p];
+          player.mechHeading = player.heading;
+        }
         player.updatedAt = now;
         room.dirty = true;
       } else if (data.type === "fire") {
+        if (player.onFoot) return;
         // Shots are simulated here; clients only draw tracers.
         const o = data.origin,
           d = data.dir;
@@ -252,16 +270,16 @@ export function createRoomServer({
         const length = Math.hypot(...d);
         if (length < 0.5 || length > 1.5) return;
         if (Math.hypot(...o.map((v, i) => v - player.position[i])) > 8) return;
-        if (
-          player.ammo <= 0 ||
-          now - player.firedAt < classOf(player.cls).fireInterval * 900
-        )
+        if (player.special?.type === "sword" && now >= player.special.until) player.special = null;
+        const special = player.special?.type;
+        const interval = special ? POWERUPS[special]?.interval : classOf(player.cls).fireInterval;
+        if ((!special && player.ammo <= 0) || now - player.firedAt < (interval || 0.16) * 900)
           return;
-        player.ammo--;
+        if (!special) player.ammo--;
         player.firedAt = now;
         const dir = d.map((v) => v / length);
-        fire(room.world, player, o, dir);
-        const shot = { type: "shot", by: player.id, origin: o, dir };
+        const weapon = fire(room.world, player, o, dir, [...room.players.values()]);
+        const shot = { type: "shot", by: player.id, origin: o, dir, weapon };
         for (const p of room.players.values()) if (p !== player) send(p.ws, shot);
         room.dirty = true;
       } else if (data.type === "paint") {
@@ -278,6 +296,7 @@ export function createRoomServer({
         if (repair(room.world, player, [...room.players.values()], now))
           room.dirty = true;
       } else if (data.type === "reload") {
+        if (player.onFoot) return;
         player.ammo = MAX_AMMO;
         room.dirty = true;
       }

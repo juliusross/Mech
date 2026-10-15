@@ -3,6 +3,8 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { classOf } from "../shared/arena.js";
 import { DEFAULT_PAINT } from "../shared/planets.js";
+import { RoundedGeometry } from "./RoundedPart.jsx";
+import { armorMaps } from "./world/armorMaps.js";
 
 // Procedural Titans. Every class has its own body; they share one gait system
 // that reads walk speed from how far the mech actually moved, so remote pilots
@@ -12,9 +14,10 @@ const tmp = new THREE.Vector3();
 function Part({ size, position, rotation, color, metal = 0.65, rough = 0.42, emissive, glow = 0 }) {
   return (
     <mesh position={position} rotation={rotation} castShadow receiveShadow>
-      <boxGeometry args={size} />
+      <RoundedGeometry size={size} />
       <meshStandardMaterial
         color={color}
+        {...armorMaps()}
         metalness={metal}
         roughness={rough}
         emissive={emissive || "#000000"}
@@ -363,7 +366,28 @@ function SupportBody({ c, pitch, idle, down, thrust }) {
 
 const BODIES = { assault: AssaultBody, scout: ScoutBody, heavy: HeavyBody, support: SupportBody };
 
-export function Mech({ paint = DEFAULT_PAINT, cls, down = false, fused = false, pitch = 0, thrust = false, idle = false }) {
+function SpecialWeapon({ type }) {
+  if (!type) return null;
+  return <group position={[1.65, 3.3, -1.45]}>
+    {type === "sword" ? <>
+      <Cyl args={[0.16, 0.18, 0.85, 10]} position={[0, -0.35, 0]} color="#30323e" />
+      <mesh position={[0, 1.25, 0]}>
+        <RoundedGeometry size={[0.25, 3.1, 0.1]} radius={0.08} />
+        <meshStandardMaterial color="#decaff" emissive="#a063ff" emissiveIntensity={3} />
+      </mesh>
+    </> : type === "shotgun" ? [-0.2, 0, 0.2].map((x) => (
+      <Cyl key={x} args={[0.13, 0.16, 2, 10]} position={[x, 0, -1.3]} rotation={[Math.PI / 2, 0, 0]} color="#414e53" />
+    )) : <>
+      <Cyl args={[type === "cannon" ? 0.42 : 0.22, type === "cannon" ? 0.5 : 0.28, 2.6, 12]} position={[0, 0, -1.6]} rotation={[Math.PI / 2, 0, 0]} color="#35464f" />
+      <mesh position={[0, 0, -3]}>
+        <torusGeometry args={[type === "cannon" ? 0.38 : 0.21, 0.07, 8, 20]} />
+        <meshStandardMaterial color={type === "laser" ? "#7cf3ff" : "#ff8a54"} emissive={type === "laser" ? "#24c8ed" : "#ed4b22"} emissiveIntensity={2} />
+      </mesh>
+    </>}
+  </group>;
+}
+
+export function Mech({ paint = DEFAULT_PAINT, cls, down = false, fused = false, pitch = 0, thrust = false, idle = false, weapon = null }) {
   const spec = classOf(cls);
   const colors = useMemo(() => {
     const base = down ? { primary: "#3a3f47", secondary: "#2b3038", visor: "#40464f" } : paint;
@@ -373,6 +397,7 @@ export function Mech({ paint = DEFAULT_PAINT, cls, down = false, fused = false, 
   return (
     <group scale={spec.scale * (fused ? 1.8 : 1)} rotation={[down ? -0.5 : 0, 0, 0]}>
       <Body c={colors} pitch={pitch} idle={idle} down={down} thrust={thrust} />
+      <SpecialWeapon type={weapon} />
     </group>
   );
 }

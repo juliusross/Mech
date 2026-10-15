@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const initial = { status: "solo", players: [], targets: [], error: "" };
+const initial = { status: "solo", players: [], targets: [], drops: [], error: "" };
 const local = ["localhost", "127.0.0.1"].includes(window.location.hostname);
 // The hosted room server only accepts origins listed in its ALLOWED_ORIGINS.
 const HOSTED = "wss://mechverse-rooms.onrender.com/multiplayer";
@@ -106,6 +106,7 @@ export function useMultiplayer() {
           targets: message.targets,
           enemies: message.enemies,
           bolts: message.bolts,
+          drops: message.drops || [],
           strikes: message.strikes || [],
           wave: message.wave,
           cleared: message.cleared,
@@ -170,6 +171,7 @@ export function useMultiplayer() {
   const sendClass = useCallback((cls) => send({ type: "class", cls }), [send]);
   const sendRepair = useCallback(() => send({ type: "repair" }), [send]);
   const sendFuse = useCallback(() => send({ type: "fuse" }), [send]);
+  const sendInteract = useCallback(() => send({ type: "interact" }), [send]);
   const sendPaint = useCallback((paint) => send({ type: "paint", paint }), [send]);
   const onEvents = useCallback((listener) => {
     eventListeners.current.add(listener);
@@ -186,6 +188,7 @@ export function useMultiplayer() {
     sendClass,
     sendRepair,
     sendFuse,
+    sendInteract,
     sendPaint,
     onEvents,
     onShot,

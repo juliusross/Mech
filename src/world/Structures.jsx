@@ -355,17 +355,47 @@ const placeModule = (m) => ({ p: [m.x, 2.2, m.z], s: [1, m.l, 1], r: [0, m.r, Ma
 
 /* ---------- volcano, smokestacks, mountains, bridges, cover ---------- */
 export function Volcano({ v }) {
+  const shell = useMemo(() => {
+    if (!v) return null;
+    const geo = new THREE.CylinderGeometry(v.r * 0.17, v.r, v.h, 40, 7, true);
+    const p = geo.attributes.position;
+    for (let i = 0; i < p.count; i++) {
+      const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+      const a = Math.atan2(z, x);
+      const n = 1 + Math.sin(a * 7 + y * 0.07) * 0.065 + Math.sin(a * 13 - y * 0.04) * 0.035;
+      p.setXYZ(i, x * n, y, z * n);
+    }
+    geo.computeVertexNormals();
+    return geo;
+  }, [v]);
   if (!v) return null;
   return (
     <group position={[v.x, 0, v.z]}>
-      <mesh position={[0, v.h / 2, 0]}>
-        <coneGeometry args={[v.r, v.h, 24, 1, true]} />
-        <meshStandardMaterial color="#2a1a15" roughness={1} />
+      <mesh geometry={shell} position={[0, v.h / 2, 0]} castShadow receiveShadow>
+        <meshStandardMaterial color="#30211e" roughness={0.96} side={THREE.DoubleSide} flatShading />
       </mesh>
-      <mesh position={[0, v.h - 2, 0]}>
-        <cylinderGeometry args={[v.r * 0.16, v.r * 0.16, 2, 24]} />
-        <meshStandardMaterial color="#ff5a1a" emissive="#ff3a00" emissiveIntensity={3} />
+      <mesh position={[0, v.h - 1, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <circleGeometry args={[v.r * 0.16, 40]} />
+        <meshStandardMaterial color="#ff5a1a" emissive="#ff3a00" emissiveIntensity={2.8} side={THREE.DoubleSide} />
       </mesh>
+      <mesh position={[0, v.h, 0]} rotation={[-Math.PI / 2, 0, 0]} castShadow>
+        <torusGeometry args={[v.r * 0.18, 3.5, 8, 40]} />
+        <meshStandardMaterial color="#1d1717" roughness={0.9} flatShading />
+      </mesh>
+      {[0.3, 2.5, 4.5].map((a) => {
+        const flow = new THREE.CatmullRomCurve3([
+          new THREE.Vector3(Math.sin(a) * v.r * 0.16, v.h - 0.5, Math.cos(a) * v.r * 0.16),
+          new THREE.Vector3(Math.sin(a) * v.r * 0.31, v.h * 0.66, Math.cos(a) * v.r * 0.31),
+          new THREE.Vector3(Math.sin(a + 0.08) * v.r * 0.48, v.h * 0.25, Math.cos(a + 0.08) * v.r * 0.48),
+          new THREE.Vector3(Math.sin(a + 0.12) * v.r * 0.62, 0.5, Math.cos(a + 0.12) * v.r * 0.62),
+        ]);
+        return (
+          <mesh key={a}>
+            <tubeGeometry args={[flow, 24, 0.9, 5, false]} />
+            <meshStandardMaterial color="#fd632b" emissive="#fa390b" emissiveIntensity={1.9} />
+          </mesh>
+        );
+      })}
       <pointLight position={[0, v.h + 10, 0]} color="#ff6a2a" intensity={4000} distance={400} />
     </group>
   );
@@ -373,9 +403,27 @@ export function Volcano({ v }) {
 export function Stacks({ stacks = [] }) {
   return stacks.map((s, i) => (
     <group key={i} position={[s.x, 0, s.z]}>
+      <mesh position={[0, 0.7, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[3.1, 3.5, 1.4, 16]} />
+        <meshStandardMaterial color="#383c42" metalness={0.56} roughness={0.57} />
+      </mesh>
       <mesh position={[0, s.h / 2, 0]} castShadow>
-        <cylinderGeometry args={[1.2, 1.8, s.h, 12]} />
-        <meshStandardMaterial color="#3a302b" roughness={0.9} />
+        <cylinderGeometry args={[1.15, 1.75, s.h, 16]} />
+        <meshStandardMaterial color="#57575a" metalness={0.54} roughness={0.67} />
+      </mesh>
+      {[0.18, 0.55, 0.87].map((fraction) => (
+        <mesh key={fraction} position={[0, s.h * fraction, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[1.52 - fraction * 0.36, 0.12, 6, 16]} />
+          <meshStandardMaterial color="#aa6f51" metalness={0.7} roughness={0.46} />
+        </mesh>
+      ))}
+      <mesh position={[2.5, 2, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
+        <cylinderGeometry args={[0.34, 0.34, 5, 10]} />
+        <meshStandardMaterial color="#616a6b" metalness={0.68} roughness={0.38} />
+      </mesh>
+      <mesh position={[5, 1.2, 0]} castShadow>
+        <sphereGeometry args={[2.2, 16, 12]} />
+        <meshStandardMaterial color="#65666a" metalness={0.56} roughness={0.4} />
       </mesh>
       <mesh position={[0, s.h + 0.3, 0]}>
         <cylinderGeometry args={[1.25, 1.25, 0.6, 12]} />
@@ -385,6 +433,36 @@ export function Stacks({ stacks = [] }) {
   ));
 }
 export function Mountains({ color, snow, seed = 1 }) {
+  const shape = useMemo(() => {
+    const geometry = new THREE.BufferGeometry();
+    const rings = [[0, 1], [0.24, 0.83], [0.5, 0.59], [0.74, 0.34], [0.91, 0.15], [1, 0.025]];
+    const segments = 12;
+    const vertices = [], colors = [], indices = [];
+    const rock = new THREE.Color(color);
+    const snowColor = new THREE.Color("#e4edf1");
+    for (let j = 0; j < rings.length; j++) {
+      const [height, radius] = rings[j];
+      for (let i = 0; i < segments; i++) {
+        const angle = (i / segments) * Math.PI * 2;
+        const variation = 1 + Math.sin(i * 2.3 + j * 1.7) * 0.11 + Math.sin(i * 4.1 - j * 2.2) * 0.07;
+        vertices.push(Math.sin(angle) * radius * variation, height, Math.cos(angle) * radius * variation);
+        const shade = 0.85 + (Math.sin(i * 1.9 + j * 2.8) + 1) * 0.09;
+        const tint = rock.clone().multiplyScalar(shade);
+        if (snow && height > 0.76) tint.lerp(snowColor, height > 0.9 ? 0.95 : 0.62);
+        colors.push(tint.r, tint.g, tint.b);
+      }
+    }
+    for (let j = 0; j < rings.length - 1; j++) for (let i = 0; i < segments; i++) {
+      const a = j * segments + i, b = j * segments + (i + 1) % segments;
+      const c = (j + 1) * segments + i, d = (j + 1) * segments + (i + 1) % segments;
+      indices.push(a, b, c, b, d, c);
+    }
+    geometry.setIndex(indices);
+    geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    geometry.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    geometry.computeVertexNormals();
+    return geometry;
+  }, [color, snow]);
   const peaks = useMemo(() => {
     const out = [];
     let x = seed * 9301 + 49297;
@@ -398,16 +476,9 @@ export function Mountains({ color, snow, seed = 1 }) {
   }, [seed]);
   return peaks.map((p, i) => (
     <group key={i} position={[p.x, 0, p.z]}>
-      <mesh position={[0, p.h / 2, 0]}>
-        <coneGeometry args={[p.w, p.h, 7]} />
-        <meshStandardMaterial color={color} roughness={1} flatShading />
+      <mesh geometry={shape} scale={[p.w, p.h, p.w]}>
+        <meshStandardMaterial vertexColors roughness={1} side={THREE.DoubleSide} />
       </mesh>
-      {snow && (
-        <mesh position={[0, p.h * 0.85, 0]}>
-          <coneGeometry args={[p.w * 0.3, p.h * 0.3, 7]} />
-          <meshStandardMaterial color="#f2f6f8" roughness={0.8} flatShading />
-        </mesh>
-      )}
     </group>
   ));
 }
