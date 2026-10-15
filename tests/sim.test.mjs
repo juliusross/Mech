@@ -350,14 +350,15 @@ import { ENEMY_TYPES, waveRoster } from "../shared/enemies.js";
 
 test("waves bring a growing mix of drones, infantry, buggies, tanks and mechs", () => {
   assert.deepEqual(waveRoster(1), { drone: 3, soldier: 4, vehicle: 0, tank: 0, mech: 0 });
+  const regular = Object.keys(ENEMY_TYPES).filter((t) => t !== "boss");
   const w3 = waveRoster(3);
-  for (const type of Object.keys(ENEMY_TYPES)) assert.ok(w3[type] > 0, `${type} appears by wave 3`);
+  for (const type of regular) assert.ok(w3[type] > 0, `${type} appears by wave 3`);
   const world = createWorld(fixed);
-  world.wave = 3;
+  world.wave = 2;
   world.waveAt = 1;
   step(world, [], 0.05, 2);
   const types = new Set(world.enemies.map((e) => e.type));
-  assert.equal(types.size, Object.keys(ENEMY_TYPES).length);
+  assert.equal(types.size, regular.length);
   const v = view(world).enemies[0];
   assert.ok("t" in v && "h" in v && "a" in v, "view carries type and headings");
 });
@@ -493,3 +494,38 @@ test("structures stop shots and enemy fire, and push movers out", () => {
 });
 
 import { toggleMech, FOOT_HP, PILOT_GUN } from "../shared/sim.js";
+
+import { isBossWave, BOSS_EVERY } from "../shared/enemies.js";
+
+test("every fourth wave is a Warlord boss fight with a few escorts", () => {
+  assert.deepEqual([1, 2, 3, 4, 5, 8].map(isBossWave), [false, false, false, true, false, true]);
+  const world = createWorld(fixed);
+  world.wave = BOSS_EVERY - 1;
+  world.waveAt = 1;
+  step(world, [], 0.05, 2);
+  const bosses = world.enemies.filter((e) => e.type === "boss");
+  assert.equal(bosses.length, 1);
+  assert.equal(bosses[0].hp, ENEMY_TYPES.boss.hp);
+  assert.ok(world.enemies.length < 10, "boss waves have light escorts");
+  assert.equal(view(world).boss, true);
+});
+
+test("in a campaign, beating the boss clears the planet instead of starting a new wave", () => {
+  for (const campaign of [true, false]) {
+    const world = createWorld(fixed, { campaign });
+    world.wave = BOSS_EVERY;
+    world.targets.forEach((t) => (t.hp = 0));
+    world.enemies.forEach((e) => (e.hp = 0));
+    step(world, [], 0.05, 10);
+    assert.ok(world.waveAt, "wave cleared");
+    step(world, [], 0.05, world.waveAt + 1);
+    if (campaign) {
+      assert.equal(world.planetCleared, true);
+      assert.equal(world.wave, BOSS_EVERY, "no new wave after the boss");
+      assert.ok(drainEvents(world).some((e) => e.kind === "cleared"));
+    } else {
+      assert.equal(world.planetCleared, false);
+      assert.equal(world.wave, BOSS_EVERY + 1, "rooms keep going");
+    }
+  }
+});

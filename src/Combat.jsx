@@ -336,3 +336,65 @@ export function DropBeam({ effect, onDone }) {
     </group>
   );
 }
+
+// Wreckage from explosions: chunks fly out, tumble, bounce, then fade away.
+export function Debris({ effect, onDone, ground = 0 }) {
+  const group = useRef();
+  const age = useRef(0);
+  const parts = React.useMemo(
+    () =>
+      Array.from({ length: 12 }, (_, i) => {
+        const a = Math.random() * Math.PI * 2,
+          sp = 4 + Math.random() * 9;
+        return {
+          p: new THREE.Vector3(0, 0.5, 0),
+          v: new THREE.Vector3(Math.cos(a) * sp, 6 + Math.random() * 9, Math.sin(a) * sp),
+          w: new THREE.Vector3(Math.random() * 8, Math.random() * 8, Math.random() * 8),
+          s: [0.25 + Math.random() * 0.55, 0.15 + Math.random() * 0.4, 0.25 + Math.random() * 0.6],
+          hot: i < 3,
+          color: ["#2b2f35", "#3a3f45", "#4a4036", "#1d2026"][i % 4],
+        };
+      }),
+    [],
+  );
+  const floor = ground - effect.p[1] + 0.1;
+  useFrame((_, dt0) => {
+    const dt = Math.min(dt0, 0.05);
+    age.current += dt;
+    const t = age.current;
+    group.current?.children.forEach((m, i) => {
+      const d = parts[i];
+      d.v.y -= 24 * dt;
+      d.p.addScaledVector(d.v, dt);
+      if (d.p.y < floor) {
+        d.p.y = floor;
+        d.v.y *= -0.35;
+        d.v.x *= 0.6;
+        d.v.z *= 0.6;
+        d.w.multiplyScalar(0.6);
+      }
+      m.position.copy(d.p);
+      m.rotation.x += d.w.x * dt;
+      m.rotation.y += d.w.y * dt;
+      m.rotation.z += d.w.z * dt;
+      // Shrink away after a few seconds on the ground.
+      const fade = Math.max(0, Math.min(1, (4 - t) / 1.2));
+      m.scale.set(d.s[0] * fade, d.s[1] * fade, d.s[2] * fade);
+    });
+    if (t >= 4) onDone(effect.id);
+  });
+  return (
+    <group ref={group} position={effect.p}>
+      {parts.map((d, i) => (
+        <mesh key={i} castShadow>
+          <boxGeometry args={[1, 1, 1]} />
+          {d.hot ? (
+            <meshStandardMaterial color="#ff7a2a" emissive="#ff5a10" emissiveIntensity={3} toneMapped={false} />
+          ) : (
+            <meshStandardMaterial color={d.color} metalness={0.6} roughness={0.5} />
+          )}
+        </mesh>
+      ))}
+    </group>
+  );
+}

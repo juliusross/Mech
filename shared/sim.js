@@ -29,7 +29,7 @@ import {
   FUSE_SCALE,
   FUSE_DAMAGE,
 } from "./planets.js";
-import { ENEMY_TYPES, waveRoster } from "./enemies.js";
+import { ENEMY_TYPES, waveRoster, isBossWave } from "./enemies.js";
 import { DROP_TYPES, POWERUPS } from "./powerups.js";
 import { terrainHeight, WORLD_EDGE } from "./terrain.js";
 import { solidsFor, solidAt, pushOut } from "./obstacles.js";
@@ -126,12 +126,15 @@ export function setClass(pilot, cls) {
 
 export function createWorld(
   random = Math.random,
-  { pvp = false, planet = "proving", scatter = false } = {},
+  { pvp = false, planet = "proving", scatter = false, campaign = false } = {},
 ) {
   const world = {
     random,
     pvp,
     scatter,
+    // Campaign: clearing the boss wave clears the planet instead of continuing.
+    campaign,
+    planetCleared: false,
     planet: PLANETS[planet] ? planet : "proving",
     strikes: [],
     nextStrikeAt: 0,
@@ -493,6 +496,14 @@ export function step(world, pilots, dt, now) {
       changed = true;
     }
   }
+  if (world.waveAt && now >= world.waveAt && world.campaign && isBossWave(world.wave)) {
+    world.waveAt = 0;
+    if (!world.planetCleared) {
+      world.planetCleared = true;
+      event(world, "cleared", [0, 0, 0]);
+    }
+    changed = true;
+  }
   if (world.waveAt && now >= world.waveAt) {
     world.wave++;
     world.waveAt = 0;
@@ -740,6 +751,8 @@ export function view(world) {
     drops: world.drops.map((d) => ({ id: d.id, type: d.type, p: d.p.map(r2) })),
     wave: world.wave,
     cleared: Boolean(world.waveAt),
+    boss: isBossWave(world.wave),
+    planetCleared: world.planetCleared,
     pvp: world.pvp,
     planet: world.planet,
     strikes: world.strikes.map((st) => ({ id: st.id, p: st.p })),

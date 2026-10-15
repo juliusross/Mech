@@ -10,6 +10,7 @@ import { RoundedGeometry } from "./RoundedPart.jsx";
 import { ENEMY_TYPES } from "../shared/enemies.js";
 import { DamageSmoke } from "./DamageEffects.jsx";
 
+const BOSS_PAINT = { primary: "#8f1418", secondary: "#141518", visor: "#ff2a2a" };
 const ENEMY_PAINT = { primary: "#6e1f24", secondary: "#24272d", visor: "#ff3b3b" };
 const turn = (from, to, k) => from + Math.atan2(Math.sin(to - from), Math.cos(to - from)) * k;
 
@@ -214,6 +215,12 @@ export function Enemy({ e }) {
       {e.t === "tank" && <Tank e={e} />}
       {e.t === "vehicle" && <Buggy e={e} />}
       {e.t === "soldier" && <Soldier e={e} />}
+      {e.t === "boss" && (
+        <group scale={2.4}>
+          <Mech cls="heavy" paint={BOSS_PAINT} loadout="rockets" />
+          <pointLight position={[0, 4, -2]} color="#ff2a2a" intensity={30} distance={14} />
+        </group>
+      )}
       {e.t === "mech" && (
         <group scale={0.95}>
           <Mech cls="assault" paint={ENEMY_PAINT} />

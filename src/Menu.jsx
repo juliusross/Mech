@@ -4,6 +4,7 @@ import { CLASSES, WEAPONS, WEAPON_IDS } from "../shared/arena.js";
 import { PLANETS, PLANET_IDS, planetOf } from "../shared/planets.js";
 import { PAINT_PRESETS } from "./settings.js";
 import { Mech } from "./Mech.jsx";
+import { HangarBay } from "./HangarBay.jsx";
 import { sfx } from "./audio.js";
 import { GAMEPAD_HELP } from "./gamepad.js";
 
@@ -102,7 +103,20 @@ export function Hangar({ settings, update, onBack, onDeploy, deployLabel = "Choo
   const spec = CLASSES[settings.cls];
   const setPaint = (key, value) => update({ paint: { ...settings.paint, [key]: value } });
   return (
-    <div className="menu hangar">
+    <div className="menu hangar bay-layout">
+      {/* Cinematic bay: the Titan stands on the left, choices on the right. */}
+      <div className="bay-stage" aria-label={`${spec.name} in the hangar bay`}>
+        <HangarBay cls={settings.cls} paint={settings.paint} loadout={settings.weapon} />
+        <div className="bay-caption">
+          <small>MECH BAY 07 · READY</small>
+          <strong>{spec.name}</strong>
+          <span>
+            {spec.armor} armor · {WEAPONS[settings.weapon]?.name}
+            {spec.repair ? " · G repair" : ""}
+          </span>
+        </div>
+      </div>
+      <aside className="bay-panel">
       <header className="menu-header">
         <button onClick={go(onBack)}>← Back</button>
         <h2>Hangar</h2>
@@ -110,7 +124,7 @@ export function Hangar({ settings, update, onBack, onDeploy, deployLabel = "Choo
           {deployLabel} →
         </button>
       </header>
-      <div className="hangar-grid">
+      <div className="bay-sections">
         <section aria-labelledby="mech-select">
           <h3 id="mech-select">Mech selection</h3>
           {locked && <p className="note">{locked}</p>}
@@ -137,13 +151,6 @@ export function Hangar({ settings, update, onBack, onDeploy, deployLabel = "Choo
               );
             })}
           </div>
-        </section>
-        <section className="hangar-preview" aria-label={`${spec.name} preview`}>
-          <MechPreview cls={settings.cls} paint={settings.paint} loadout={settings.weapon} />
-          <p className="preview-caption">
-            {spec.name} · {spec.armor} armor
-            {spec.repair ? " · G repair" : ""}
-          </p>
         </section>
         <section aria-labelledby="paint">
           <h3 id="weapons">Weapon loadout</h3>
@@ -209,6 +216,7 @@ export function Hangar({ settings, update, onBack, onDeploy, deployLabel = "Choo
           ))}
         </section>
       </div>
+      </aside>
     </div>
   );
 }
@@ -243,7 +251,10 @@ export function PlanetSelect({ settings, update, onBack, onLaunch, launchLabel =
                   background: `radial-gradient(circle at 35% 35%, ${P.sun} 0, ${P.ground} 38%, ${P.sky} 72%)`,
                 }}
               />
-              <strong>{P.name}</strong>
+              <strong>
+                {P.name}
+                {settings.cleared?.includes(id) ? " ✓" : ""}
+              </strong>
               <span>{P.blurb}</span>
             </button>
           );

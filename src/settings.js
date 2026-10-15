@@ -10,6 +10,7 @@ export const DEFAULTS = {
   weapon: "plasma",
   paint: DEFAULT_PAINT,
   planet: "proving",
+  cleared: [],
   volume: 0.7,
   sensitivity: 1,
   invertY: false,
@@ -34,6 +35,7 @@ export function loadSettings() {
     volume: Math.min(1, Math.max(0, Number(s.volume) || 0)),
     sensitivity: Math.min(3, Math.max(0.2, Number(s.sensitivity) || 1)),
     invertY: Boolean(s.invertY),
+    cleared: Array.isArray(s.cleared) ? s.cleared.filter((id) => PLANETS[id]) : [],
   };
 }
 
