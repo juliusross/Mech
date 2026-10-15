@@ -6,7 +6,7 @@ import {
   fire,
   step,
   view,
-  droneCount,
+  enemyCount,
   MAX_ARMOR,
   BOLT_DAMAGE,
   RESPAWN_MS,
@@ -22,14 +22,13 @@ function run(world, pilots, seconds, start = 0) {
   return now;
 }
 
-test("drones hunt the nearest pilot and their bolts wear down armor", () => {
+test("enemies hunt the nearest pilot and their fire wears down armor", () => {
   const world = createWorld(fixed);
-  assert.equal(world.drones.length, droneCount(1));
+  assert.equal(world.enemies.length, enemyCount(1));
   const pilot = createPilot([0, 0, 8]);
   run(world, [pilot], 12);
   assert.ok(pilot.armor < MAX_ARMOR, "pilot took damage");
-  assert.equal((MAX_ARMOR - pilot.armor) % BOLT_DAMAGE, 0);
-  for (const d of world.drones) {
+  for (const d of world.enemies.filter((e) => e.type === "drone")) {
     const gap = Math.hypot(d.pos[0] - 0, d.pos[2] - 8);
     assert.ok(gap < 25, `drone ${d.id} closed in (${gap.toFixed(1)})`);
   }
@@ -55,11 +54,12 @@ test("a pilot at zero armor goes down, is ignored, then reboots at spawn", () =>
   assert.equal(pilot.respawns, 1);
 });
 
-test("shots destroy drones for two points and waves need drones cleared too", () => {
+test("shots destroy drones for two points and waves need enemies cleared too", () => {
   const world = createWorld(fixed);
   const pilot = createPilot([0, 0, 8]);
   for (const t of world.targets) t.hp = 0;
-  const [first, ...rest] = world.drones;
+  const first = world.enemies.find((e) => e.type === "drone");
+  const rest = world.enemies.filter((e) => e !== first);
   first.pos = [0, 2.5, -10];
   for (const d of rest) d.hp = 0;
   let now = 0;
@@ -74,11 +74,11 @@ test("shots destroy drones for two points and waves need drones cleared too", ()
   assert.equal(view(world).cleared, true);
   now = run(world, [pilot], 4.1, now);
   assert.equal(world.wave, 2);
-  assert.equal(view(world).drones.length, droneCount(2));
+  assert.equal(view(world).enemies.length, enemyCount(2));
   assert.ok(view(world).targets.every((hp) => hp === 3));
 });
 
-test("targets alone do not clear a wave while drones remain", () => {
+test("targets alone do not clear a wave while enemies remain", () => {
   const world = createWorld(fixed);
   for (const t of world.targets) t.hp = 0;
   step(world, [], 0.05, 50);
@@ -90,7 +90,7 @@ import { CLASSES, REPAIR_AMOUNT } from "../shared/arena.js";
 
 test("classes set armor, and heavy shots deal double damage", () => {
   const world = createWorld(fixed);
-  world.drones = [];
+  world.enemies = [];
   const heavy = createPilot([0, 0, 8], "heavy");
   const scout = createPilot([4, 0, 8], "scout");
   assert.equal(heavy.armor, CLASSES.heavy.armor);
@@ -129,7 +129,7 @@ test("support repair heals nearby pilots and then cools down", () => {
 test("versus rooms let pilots damage and down each other; co-op rooms do not", () => {
   for (const pvp of [false, true]) {
     const world = createWorld(fixed, { pvp });
-    world.drones = [];
+    world.enemies = [];
     world.targets = [];
     const a = createPilot([0, 0, 8]);
     const b = createPilot([0, 0, -2]);
@@ -150,7 +150,7 @@ test("versus rooms let pilots damage and down each other; co-op rooms do not", (
 
 test("destroying things emits explosion events", () => {
   const world = createWorld(fixed);
-  world.drones = [];
+  world.enemies = [];
   const pilot = createPilot([0, 0, 8]);
   world.targets[1].hp = 1;
   fire(world, pilot, [-4.5, 2.5, -6], [0, 0, -1]);
@@ -172,7 +172,7 @@ import {
 test("lava on Ember burns pilots standing in it, but not elsewhere or on other planets", () => {
   for (const planet of ["ember", "proving"]) {
     const world = createWorld(fixed, { planet });
-    world.drones = [];
+    world.enemies = [];
     const pilot = createPilot([-22, 0, -4]);
     const safe = createPilot([0, 0, 8]);
     run(world, [pilot, safe], 1);
@@ -185,7 +185,7 @@ test("lava on Ember burns pilots standing in it, but not elsewhere or on other p
 
 test("lightning on Tempest warns first, then strikes pilots inside the zone", () => {
   const world = createWorld(fixed, { planet: "tempest" });
-  world.drones = [];
+  world.enemies = [];
   const pilot = createPilot([0, 0, 8]);
   let now = run(world, [pilot], 3.1);
   assert.ok(world.strikes.length, "a warning zone appeared");
@@ -197,7 +197,7 @@ test("lightning on Tempest warns first, then strikes pilots inside the zone", ()
 
 test("two nearby pilots who both request fusion become one big Titan, then split", () => {
   const world = createWorld(fixed);
-  world.drones = [];
+  world.enemies = [];
   const a = createPilot([0, 0, 8]);
   const b = createPilot([4, 0, 8], "heavy");
   const far = createPilot([40, 0, 8]);
@@ -229,15 +229,59 @@ test("two nearby pilots who both request fusion become one big Titan, then split
 
 test("a fused Titan destroyed by damage downs both pilots", () => {
   const world = createWorld(fixed);
-  world.drones = [];
+  world.enemies = [];
   const a = createPilot([0, 0, 8]);
   const b = createPilot([2, 0, 8]);
   requestFuse(world, a, 0);
   requestFuse(world, b, 10);
   step(world, [a, b], 0.05, 20);
   a.fusion.armor = BOLT_DAMAGE;
-  world.bolts.push({ id: 999, pos: [0, 2.5, 6], dir: [0, 0, 1], life: 1 });
+  world.bolts.push({ id: 999, pos: [0, 3, 6], dir: [0, 0, 1], life: 1, damage: BOLT_DAMAGE, speed: 24 });
   step(world, [a, b], 0.1, 60);
   assert.ok(a.downUntil && b.downUntil);
   assert.equal(a.fusion, null);
+});
+
+import { ENEMY_TYPES, waveRoster } from "../shared/enemies.js";
+
+test("waves bring a growing mix of drones, infantry, buggies, tanks and mechs", () => {
+  assert.deepEqual(waveRoster(1), { drone: 3, soldier: 4, vehicle: 0, tank: 0, mech: 0 });
+  const w3 = waveRoster(3);
+  for (const type of Object.keys(ENEMY_TYPES)) assert.ok(w3[type] > 0, `${type} appears by wave 3`);
+  const world = createWorld(fixed);
+  world.wave = 3;
+  world.waveAt = 1;
+  step(world, [], 0.05, 2);
+  const types = new Set(world.enemies.map((e) => e.type));
+  assert.equal(types.size, Object.keys(ENEMY_TYPES).length);
+  const v = view(world).enemies[0];
+  assert.ok("t" in v && "h" in v && "a" in v, "view carries type and headings");
+});
+
+test("each enemy type fires its own projectile and is destroyed by its own hit points", () => {
+  for (const [type, T] of Object.entries(ENEMY_TYPES)) {
+    const world = createWorld(fixed);
+    world.targets = [];
+    const pilot = createPilot([0, 0, 8]);
+    world.enemies = [
+      { id: 1, type, slot: 0, pos: [0, T.fly ? 3 : 0, -10], hp: T.hp, heading: 0, aim: 0, cooldown: 0, burstLeft: 0, burstTimer: 0 },
+    ];
+    step(world, [pilot], 0.01, 10);
+    step(world, [pilot], 0.01, 20);
+    assert.ok(world.bolts.length, `${type} fired`);
+    assert.equal(world.bolts[0].kind, T.bolt);
+    assert.equal(world.bolts[0].damage, T.damage);
+    world.bolts = [];
+    const enemy = world.enemies[0];
+    enemy.cooldown = 99;
+    enemy.burstLeft = 0;
+    let now = 30;
+    for (let i = 0; i < T.hp; i++) {
+      const c = [enemy.pos[0], enemy.pos[1] + T.center, enemy.pos[2]];
+      fire(world, pilot, [c[0], c[1], c[2] + 6], [0, 0, -1]);
+      now = run(world, [pilot], 0.3, now);
+    }
+    assert.equal(enemy.hp, 0, `${type} destroyed after ${T.hp} hits`);
+    assert.equal(pilot.score, T.score);
+  }
 });

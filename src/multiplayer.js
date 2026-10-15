@@ -104,7 +104,7 @@ export function useMultiplayer() {
           ...old,
           players: message.players,
           targets: message.targets,
-          drones: message.drones,
+          enemies: message.enemies,
           bolts: message.bolts,
           strikes: message.strikes || [],
           wave: message.wave,

@@ -40,7 +40,8 @@ export function MechPreview({ cls, paint, className = "preview", far = false }) 
         <directionalLight position={[6, 10, 6]} intensity={2.6} castShadow />
         <directionalLight position={[-6, 4, -6]} intensity={1.2} color="#6fb8ff" />
         <Turntable>
-          <group position={[0, -0.2, 0]}>
+          {/* Normalise class size so every Titan fits the preview. */}
+          <group position={[0, -0.2, 0]} scale={1 / CLASSES[cls].scale}>
             <Mech cls={cls} paint={paint} idle />
           </group>
         </Turntable>
@@ -189,7 +190,7 @@ export function PlanetSelect({ settings, update, onBack, onLaunch, launchLabel =
       <header className="menu-header">
         <button onClick={go(onBack)}>← Back</button>
         <h2>Choose a planet</h2>
-        <button className="primary" onClick={go(onLaunch)}>
+        <button className="primary" onClick={go(() => onLaunch(settings.planet))}>
           {launchLabel} →
         </button>
       </header>
@@ -204,7 +205,7 @@ export function PlanetSelect({ settings, update, onBack, onLaunch, launchLabel =
               onClick={go(() => update({ planet: id }))}
               onDoubleClick={() => {
                 update({ planet: id });
-                onLaunch();
+                onLaunch(id);
               }}
             >
               <span

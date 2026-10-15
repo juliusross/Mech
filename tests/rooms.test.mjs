@@ -191,7 +191,7 @@ test("clearing every target starts the next wave", async (t) => {
   const room = server.rooms.get(aw.room);
   for (const target of room.world.targets) target.hp = 0;
   room.world.targets[0].hp = 1;
-  for (const drone of room.world.drones) drone.hp = 0;
+  for (const enemy of room.world.enemies) enemy.hp = 0;
   room.players.get(aw.id).position = [-13.5, 0, -5];
   a.send({ type: "fire", origin: [-13.5, 2.5, -6], dir: [0, 0, -1] });
   await a.wait((m) => m.type === "snapshot" && m.cleared);
@@ -259,6 +259,8 @@ test("rooms carry a planet, pilots carry paint jobs, and two pilots can fuse", a
   assert.equal(pa.paint.visor, "#00d9ff", "invalid colours fall back to defaults");
   b.send({ type: "paint", paint: { primary: "#abcdef" } });
   a.send({ type: "fuse" });
+  // Messages from different sockets can arrive in either order; ask in sequence.
+  await new Promise((r) => setTimeout(r, 40));
   b.send({ type: "fuse" });
   await new Promise((r) => setTimeout(r, 150));
   assert.equal(room.players.get(wb.id).paint.primary, "#abcdef");

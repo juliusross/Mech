@@ -47,8 +47,8 @@ export function RoomPanel({ network, settings, startOpen }) {
       <div className="room-body" hidden={!open && !network.error}>
       <p className="room-note">
         {connected && network.pvp
-          ? "Versus · Pilots and drones can hit you"
-          : "Squad defense · Clear targets and drones together"}
+          ? "Versus · Pilots and enemies can hit you"
+          : "Squad defense · Clear targets and enemies together"}
       </p>
       {network.error && (
         <p role="alert" className="room-error">

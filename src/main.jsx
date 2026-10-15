@@ -8,7 +8,9 @@ import { useMultiplayer } from "./multiplayer";
 import { RoomPanel } from "./RoomPanel";
 import { Mech } from "./Mech.jsx";
 import { PlanetScene } from "./Planet.jsx";
-import { Drone, Bolt, Effect } from "./Combat.jsx";
+import { Effect } from "./Combat.jsx";
+import { Enemy, EnemyBolt } from "./Enemies.jsx";
+import { ENEMY_TYPES } from "../shared/enemies.js";
 import { MainMenu, Hangar, PlanetSelect, Settings, PauseMenu } from "./Menu.jsx";
 import { initAudio, setVolume, sfx, near } from "./audio.js";
 import { loadSettings, saveSettings } from "./settings.js";
@@ -104,7 +106,15 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   const dodge = useRef(0);
   const burst = useRef(0);
   const solo = useRef(null);
-  if (!connected && !solo.current) solo.current = createWorld(Math.random, { planet: soloPlanet });
+  if (!connected && !solo.current) {
+    solo.current = createWorld(Math.random, { planet: soloPlanet });
+    // Testing aid: ?testwave=N starts solo play at wave N.
+    const testWave = Number(new URLSearchParams(location.search).get("testwave"));
+    if (testWave > 1) {
+      solo.current.wave = testWave - 1;
+      solo.current.waveAt = 1;
+    }
+  }
   const me = useRef(createPilot(network.spawn || [0, 0, 8], cls));
   const [soloScene, setSoloScene] = useState(() => solo.current && view(solo.current));
   const planet = connected ? network.planet || "proving" : soloPlanet;
@@ -112,7 +122,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   const scene = connected
     ? {
         targets: network.targets,
-        drones: network.drones || [],
+        enemies: network.enemies || [],
         bolts: network.bolts || [],
         strikes: network.strikes || [],
         wave: network.wave ?? 1,
@@ -122,7 +132,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
     : soloScene;
   const shownTargets = INITIAL_TARGETS.map((t, i) => ({ ...t, hp: scene.targets[i] ?? 0 }));
   const live = useRef(null);
-  live.current = { targets: shownTargets, drones: scene.drones };
+  live.current = { targets: shownTargets, enemies: scene.enemies };
   const wasDown = useRef(false);
   const wasGunner = useRef(false);
   const lastHud = useRef("");
@@ -282,7 +292,10 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
         const p = b.pos.toArray();
         if (
           live.current.targets.some((t) => t.hp > 0 && hitsTarget(p, t)) ||
-          live.current.drones.some((d) => Math.hypot(p[0] - d.p[0], p[1] - d.p[1], p[2] - d.p[2]) < 1.8)
+          live.current.enemies.some((e) => {
+            const T = ENEMY_TYPES[e.t];
+            return Math.hypot(p[0] - e.p[0], p[1] - e.p[1] - T.center, p[2] - e.p[2]) < T.radius;
+          })
         )
           b.life = 0;
         return b.life > 0;
@@ -323,7 +336,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       wave: scene.wave,
       cleared: scene.cleared,
       targetsDown: scene.targets.filter((hp) => hp === 0).length,
-      drones: scene.drones.length,
+      enemies: scene.enemies.length,
       repairIn: spec.repair ? Math.max(0, Math.ceil((repairReady.current - now) / 1000)) : null,
       pvp: Boolean(scene.pvp),
       planet,
@@ -385,11 +398,11 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
         .map((t) => (
           <Target key={t.id} t={t} />
         ))}
-      {scene.drones.map((d) => (
-        <Drone key={d.id} drone={d} />
+      {scene.enemies.map((e) => (
+        <Enemy key={e.id} e={e} />
       ))}
       {scene.bolts.map((b) => (
-        <Bolt key={b.id} bolt={b} />
+        <EnemyBolt key={b.id} bolt={b} />
       ))}
       {effects.map((e) => (
         <Effect key={e.id} effect={e} onDone={removeEffect} />
@@ -533,10 +546,10 @@ function App() {
       r?.catch?.(() => {});
     } catch {}
   };
-  const startSolo = () => {
+  const startSolo = (planet = settings.planet) => {
     initAudio();
     network.leave();
-    setSoloPlanet(settings.planet);
+    setSoloPlanet(planet);
     setInGame(true);
     setScreen("play");
     setPaused(false);
@@ -649,7 +662,7 @@ function App() {
                 ? "Wave 1"
                 : hud.cleared
                   ? `Wave ${hud.wave} cleared · next wave incoming`
-                  : `Wave ${hud.wave} · Targets ${hud.targetsDown}/12 · Drones ${hud.drones}`}
+                  : `Wave ${hud.wave} · Targets ${hud.targetsDown}/12 · Enemies ${hud.enemies}`}
             </p>
             <p>
               Score {hud?.score ?? 0} · Ammo {ammo}/{MAX_AMMO}

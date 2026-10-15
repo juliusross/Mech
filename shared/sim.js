@@ -27,6 +27,7 @@ import {
   FUSE_SCALE,
   FUSE_DAMAGE,
 } from "./planets.js";
+import { ENEMY_TYPES, waveRoster } from "./enemies.js";
 
 export const MAX_ARMOR = 100;
 export const BOLT_DAMAGE = 6;
@@ -35,12 +36,6 @@ export const WAVE_DELAY = 4000;
 // In versus rooms one point of cannon damage removes this much armor.
 export const PVP_DAMAGE = 5;
 export const PVP_KO_SCORE = 5;
-const DRONE_HP = 4;
-const DRONE_SPEED = 7;
-const DRONE_RANGE = 45;
-const DRONE_RADIUS = 1.8;
-const ORBIT = 16;
-const BOLT_SPEED = 24;
 const BOLT_LIFE = 4;
 const PILOT_RADIUS = 1.7;
 
@@ -97,7 +92,7 @@ export function createWorld(
     wave: 1,
     waveAt: 0,
     targets: [],
-    drones: [],
+    enemies: [],
     bolts: [],
     shots: [],
     events: [],
@@ -106,19 +101,65 @@ export function createWorld(
   return world;
 }
 
-export const droneCount = (wave) => Math.min(2 + wave, 8);
+const typeOf = (e) => ENEMY_TYPES[e.type];
+const centerOf = (e) => [e.pos[0], e.pos[1] + typeOf(e).center, e.pos[2]];
+export const enemyCount = (wave) =>
+  Object.values(waveRoster(wave)).reduce((a, b) => a + b, 0);
+
+function spawnPoint(world, type, i, n) {
+  const r = world.random;
+  if (type === "drone") return [((i + 0.5) / n - 0.5) * 90, 3, -72];
+  if (type === "vehicle") return [(i % 2 ? 1 : -1) * 60, 0, -30 - r() * 30];
+  if (type === "soldier") {
+    // Infantry arrive in squads of four.
+    const squad = Math.floor(i / 4);
+    return [(squad - 1) * 28 + (r() - 0.5) * 6, 0, -78 + (r() - 0.5) * 6];
+  }
+  return [((i + 0.5) / n - 0.5) * 70, 0, -80];
+}
 
 function startWave(world) {
   world.targets = TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
-  const n = droneCount(world.wave);
-  world.drones = Array.from({ length: n }, (_, i) => ({
-    id: world.nextId++,
-    slot: i,
-    pos: [((i + 0.5) / n - 0.5) * 90, 3, -72],
-    hp: DRONE_HP,
-    cooldown: 2 + world.random() * 2,
-  }));
+  world.enemies = [];
+  let slot = 0;
+  for (const [type, n] of Object.entries(waveRoster(world.wave)))
+    for (let i = 0; i < n; i++) {
+      const T = ENEMY_TYPES[type];
+      world.enemies.push({
+        id: world.nextId++,
+        type,
+        slot: slot++,
+        pos: spawnPoint(world, type, i, n),
+        hp: T.hp,
+        heading: 0,
+        aim: 0,
+        cooldown: T.cooldown[0] * (0.6 + world.random() * 0.8),
+        burstLeft: 0,
+        burstTimer: 0,
+      });
+    }
   world.bolts = [];
+}
+
+function shoot(world, e, target) {
+  const T = typeOf(e);
+  const from = centerOf(e);
+  if (e.type === "tank") from[1] += 0.6;
+  const aim = chest(target);
+  const len = dist(aim, from) || 1;
+  const dir = aim.map((v, i) => (v - from[i]) / len);
+  // Aim error, so infantry and buggies miss some of the time.
+  for (let i = 0; i < 3; i++) dir[i] += (world.random() - 0.5) * 2 * T.spread;
+  const n = Math.hypot(...dir) || 1;
+  world.bolts.push({
+    id: world.nextId++,
+    pos: from,
+    dir: dir.map((v) => v / n),
+    life: BOLT_LIFE,
+    damage: T.damage,
+    speed: T.boltSpeed,
+    kind: T.bolt,
+  });
 }
 
 const event = (world, kind, pos) =>
@@ -279,48 +320,57 @@ export function step(world, pilots, dt, now) {
       for (const p of alive)
         if (!p.downUntil && Math.hypot(p.position[0] - st.p[0], p.position[2] - st.p[2]) < STRIKE_RADIUS)
           damagePilot(world, p, STRIKE_DAMAGE, now);
-      for (const d of world.drones)
-        if (d.hp > 0 && Math.hypot(d.pos[0] - st.p[0], d.pos[2] - st.p[2]) < STRIKE_RADIUS) d.hp = Math.max(0, d.hp - 2);
+      for (const e of world.enemies)
+        if (e.hp > 0 && Math.hypot(e.pos[0] - st.p[0], e.pos[2] - st.p[2]) < STRIKE_RADIUS) e.hp = Math.max(0, e.hp - 2);
       event(world, "strike", st.p);
       changed = true;
       return false;
     });
   }
 
-  for (const d of world.drones) {
-    if (d.hp <= 0) continue;
+  for (const e of world.enemies) {
+    if (e.hp <= 0) continue;
     changed = true;
+    const T = typeOf(e);
     let target = null,
       best = Infinity;
     for (const p of alive) {
-      const k = dist(d.pos, chest(p));
+      const k = dist(centerOf(e), chest(p));
       if (k < best) [best, target] = [k, p];
     }
     if (!target) continue;
-    // Each drone circles its target at its own angle so the swarm spreads out.
-    const a = d.slot * 2.4 + now / 4000;
+    // Each enemy holds its own bearing around the target so groups spread out;
+    // orbiting types sweep around it over time.
+    const a = e.slot * 2.4 + (T.orbit ? now / (e.type === "vehicle" ? 2500 : 4000) : now / 20000);
     const goal = [
-      target.position[0] + Math.sin(a) * ORBIT,
-      3 + Math.sin(now / 600 + d.slot) * 0.6,
-      target.position[2] + Math.cos(a) * ORBIT,
+      target.position[0] + Math.sin(a) * T.keep,
+      T.fly ? 3 + Math.sin(now / 600 + e.slot) * 0.6 : 0,
+      target.position[2] + Math.cos(a) * T.keep,
     ];
-    const gap = dist(goal, d.pos);
-    const move = Math.min(gap, DRONE_SPEED * dt);
-    if (gap > 0.01)
-      for (let i = 0; i < 3; i++) d.pos[i] += ((goal[i] - d.pos[i]) / gap) * move;
-    d.pos[0] = clamp(d.pos[0], -65, 65);
-    d.pos[2] = clamp(d.pos[2], -85, 65);
-    d.cooldown -= dt;
-    if (d.cooldown <= 0 && best < DRONE_RANGE) {
-      d.cooldown = 2.4 + world.random() * 1.2;
-      const aim = chest(target);
-      const len = dist(aim, d.pos) || 1;
-      world.bolts.push({
-        id: world.nextId++,
-        pos: [...d.pos],
-        dir: aim.map((v, i) => (v - d.pos[i]) / len),
-        life: BOLT_LIFE,
-      });
+    const gap = dist(goal, e.pos);
+    const move = Math.min(gap, T.speed * dt);
+    if (gap > 0.01) {
+      for (let i = 0; i < 3; i++) e.pos[i] += ((goal[i] - e.pos[i]) / gap) * move;
+      if (move > 0.01) e.heading = Math.atan2(-(goal[0] - e.pos[0]), -(goal[2] - e.pos[2]));
+    }
+    e.pos[0] = clamp(e.pos[0], -65, 65);
+    e.pos[2] = clamp(e.pos[2], -85, 65);
+    e.aim = Math.atan2(-(target.position[0] - e.pos[0]), -(target.position[2] - e.pos[2]));
+    if (gap < 1) e.heading = e.aim;
+    if (e.burstLeft > 0) {
+      e.burstTimer -= dt;
+      if (e.burstTimer <= 0) {
+        shoot(world, e, target);
+        e.burstLeft--;
+        e.burstTimer = T.burstGap;
+        if (!e.burstLeft) e.cooldown = T.cooldown[0] + world.random() * (T.cooldown[1] - T.cooldown[0]);
+      }
+    } else {
+      e.cooldown -= dt;
+      if (e.cooldown <= 0 && best < T.range) {
+        e.burstLeft = T.burst;
+        e.burstTimer = 0;
+      }
     }
   }
 
@@ -328,13 +378,13 @@ export function step(world, pilots, dt, now) {
     h = dt / steps;
   world.bolts = world.bolts.filter((b) => {
     for (let i = 0; i < steps && b.life > 0; i++) {
-      for (let a = 0; a < 3; a++) b.pos[a] += b.dir[a] * BOLT_SPEED * h;
+      for (let a = 0; a < 3; a++) b.pos[a] += b.dir[a] * b.speed * h;
       b.life -= h;
       const hit = alive.find(
         (p) => targetable(p) && dist(b.pos, chest(p)) < PILOT_RADIUS * sizeOf(p),
       );
       if (hit) {
-        damagePilot(world, hit, BOLT_DAMAGE, now);
+        damagePilot(world, hit, b.damage, now);
         event(world, "hit", b.pos);
         b.life = 0;
       }
@@ -343,7 +393,7 @@ export function step(world, pilots, dt, now) {
     return b.life > 0;
   });
 
-  // Sub-steps keep 60 u/s bullets from tunnelling through targets and drones.
+  // Sub-steps keep 60 u/s bullets from tunnelling through targets and enemies.
   world.shots = world.shots.filter((s) => {
     for (let i = 0; i < steps && s.life > 0; i++) {
       for (let a = 0; a < 3; a++) s.pos[a] += s.dir[a] * BULLET_SPEED * h;
@@ -351,7 +401,8 @@ export function step(world, pilots, dt, now) {
       const credit = pilots.includes(s.by);
       const t = world.targets.find((t) => t.hp > 0 && hitsTarget(s.pos, t));
       const d =
-        !t && world.drones.find((d) => d.hp > 0 && dist(s.pos, d.pos) < DRONE_RADIUS);
+        !t &&
+        world.enemies.find((e) => e.hp > 0 && dist(s.pos, centerOf(e)) < typeOf(e).radius);
       const rival =
         world.pvp &&
         !t &&
@@ -372,8 +423,8 @@ export function step(world, pilots, dt, now) {
       } else if (d) {
         d.hp = Math.max(0, d.hp - s.damage);
         if (!d.hp) {
-          if (credit) s.by.score += 2;
-          event(world, "boom", d.pos);
+          if (credit) s.by.score += typeOf(d).score;
+          event(world, "boom", centerOf(d));
         }
       } else if (rival) {
         if (damagePilot(world, rival, s.damage * PVP_DAMAGE, now) && credit)
@@ -391,7 +442,7 @@ export function step(world, pilots, dt, now) {
   if (
     !world.waveAt &&
     world.targets.every((t) => !t.hp) &&
-    world.drones.every((d) => d.hp <= 0)
+    world.enemies.every((e) => e.hp <= 0)
   ) {
     world.waveAt = now + WAVE_DELAY;
     changed = true;
@@ -404,10 +455,10 @@ const r2 = (v) => Math.round(v * 100) / 100;
 export function view(world) {
   return {
     targets: world.targets.map((t) => t.hp),
-    drones: world.drones
-      .filter((d) => d.hp > 0)
-      .map((d) => ({ id: d.id, p: d.pos.map(r2), hp: d.hp })),
-    bolts: world.bolts.map((b) => ({ id: b.id, p: b.pos.map(r2) })),
+    enemies: world.enemies
+      .filter((e) => e.hp > 0)
+      .map((e) => ({ id: e.id, t: e.type, p: e.pos.map(r2), hp: e.hp, h: r2(e.heading), a: r2(e.aim) })),
+    bolts: world.bolts.map((b) => ({ id: b.id, p: b.pos.map(r2), k: b.kind })),
     wave: world.wave,
     cleared: Boolean(world.waveAt),
     pvp: world.pvp,
