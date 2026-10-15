@@ -2,6 +2,7 @@ import React, { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { armorMaps } from "./world/armorMaps.js";
+import { DamageSmoke, ImpactParticles } from "./DamageEffects.jsx";
 
 // Snapshot positions arrive 20 times a second; ease toward them every frame.
 function Follow({ p, rate = 18, children }) {
@@ -98,6 +99,7 @@ export function Drone({ drone }) {
             <meshStandardMaterial color="#56646b" metalness={0.6} roughness={0.45} />
           </mesh>
         ))}
+        {damaged && <DamageSmoke severity={1 - drone.hp / 4} position={[0, 0.2, 0.5]} />}
       </group>
     </Follow>
   );
@@ -113,10 +115,10 @@ export function Bolt({ bolt }) {
   );
 }
 export const EFFECT_LIFE = {
-  boom: 0.7,
-  hit: 0.25,
+  boom: 1.8,
+  hit: 0.7,
   repair: 0.8,
-  down: 0.9,
+  down: 1.8,
   fuse: 1.0,
   unfuse: 0.7,
   strike: 0.6,
@@ -125,25 +127,31 @@ export function Effect({ effect, onDone }) {
   const mesh = useRef();
   const material = useRef();
   const age = useRef(0);
+  const finished = useRef(false);
   const life = EFFECT_LIFE[effect.kind] ?? 0.5;
   useFrame((_, dt) => {
     age.current += dt;
     const t = Math.min(1, age.current / life);
+    const impact = effect.kind === "boom" || effect.kind === "hit" || effect.kind === "down";
+    const flash = impact ? Math.max(0, 1 - age.current / (effect.kind === "hit" ? 0.18 : 0.33)) : 1 - t;
     const size =
       effect.kind === "boom"
-        ? 0.6 + t * 4.2
+        ? 0.6 + (1 - flash) * 3.5
         : effect.kind === "repair"
           ? 1 + t * 13
           : effect.kind === "down"
-            ? 0.5 + t * 3
+            ? 0.5 + (1 - flash) * 3
             : effect.kind === "fuse" || effect.kind === "unfuse"
               ? 1 + t * 7
               : effect.kind === "strike"
                 ? 5 * (1 - t * 0.6)
-                : 0.3 + t * 0.9;
+                : 0.3 + (1 - flash) * 0.9;
     mesh.current?.scale.setScalar(size);
-    if (material.current) material.current.opacity = (1 - t) * 0.85;
-    if (t >= 1) onDone(effect.id);
+    if (material.current) material.current.opacity = flash * 0.7;
+    if (t >= 1 && !finished.current) {
+      finished.current = true;
+      onDone(effect.id);
+    }
   });
   const color = {
     boom: "#ffb347",
@@ -155,22 +163,22 @@ export function Effect({ effect, onDone }) {
     strike: "#dfe9ff",
   }[effect.kind];
   return (
-    <mesh
-      ref={mesh}
-      position={effect.p}
-      rotation={effect.kind === "repair" ? [-Math.PI / 2, 0, 0] : [0, 0, 0]}
-    >
-      {effect.kind === "repair" ? (
-        <torusGeometry args={[1, 0.06, 6, 40]} />
-      ) : (
-        <sphereGeometry args={[1, 14, 10]} />
+    <>
+      <mesh
+        ref={mesh}
+        position={effect.p}
+        rotation={effect.kind === "repair" ? [-Math.PI / 2, 0, 0] : [0, 0, 0]}
+      >
+        {effect.kind === "repair" ? (
+          <torusGeometry args={[1, 0.06, 6, 40]} />
+        ) : (
+          <sphereGeometry args={[1, 14, 10]} />
+        )}
+        <meshBasicMaterial ref={material} color={color} transparent depthWrite={false} />
+      </mesh>
+      {(effect.kind === "boom" || effect.kind === "hit" || effect.kind === "down") && (
+        <ImpactParticles effect={effect} age={age} />
       )}
-      <meshBasicMaterial
-        ref={material}
-        color={color}
-        transparent
-        depthWrite={false}
-      />
-    </mesh>
+    </>
   );
 }

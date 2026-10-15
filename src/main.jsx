@@ -11,6 +11,7 @@ import { Pilot } from "./Pilot.jsx";
 import { RoundedGeometry } from "./RoundedPart.jsx";
 import { PlanetScene } from "./Planet.jsx";
 import { Effect } from "./Combat.jsx";
+import { DamageSmoke } from "./DamageEffects.jsx";
 import { Enemy, EnemyBolt } from "./Enemies.jsx";
 import { ENEMY_TYPES } from "../shared/enemies.js";
 import { MainMenu, Hangar, PlanetSelect, Settings, PauseMenu } from "./Menu.jsx";
@@ -58,6 +59,7 @@ function RemoteMech({ pilot }) {
   if (pilot.fusion?.role === "gunner") return null;
   const fused = pilot.fusion?.role === "driver";
   const scale = classOf(pilot.cls).scale * (fused ? FUSE_SCALE : 1);
+  const damage = 1 - pilot.armor / classOf(pilot.cls).armor;
   return (
     <>
       <group ref={group} position={initial.current}>
@@ -66,6 +68,7 @@ function RemoteMech({ pilot }) {
         ) : (
           <Mech paint={pilot.paint} cls={pilot.cls} down={pilot.down} fused={fused} thrust={pilot.position[1] > 0.4} />
         )}
+        {!pilot.onFoot && damage >= 0.5 && <DamageSmoke severity={damage} position={[0, 3.5 * scale, 0]} />}
         <Html position={[0, pilot.onFoot ? 2.7 : 5.9 * scale, 0]} center style={{ pointerEvents: "none" }}>
           <span className="pilot-label">
             {pilot.name}
@@ -76,6 +79,7 @@ function RemoteMech({ pilot }) {
       {pilot.onFoot && (
         <group position={pilot.mechPosition} rotation={[0, pilot.mechHeading || 0, 0]}>
           <Mech paint={pilot.paint} cls={pilot.cls} />
+          {damage >= 0.5 && <DamageSmoke severity={damage} position={[0, 3.5 * scale, 0]} />}
         </group>
       )}
     </>
@@ -113,6 +117,7 @@ function Target({ t }) {
         <sphereGeometry args={[0.22, 12, 10]} />
         <meshStandardMaterial color="#ff4949" emissive="#b31818" emissiveIntensity={2} />
       </mesh>
+      {t.hp === 1 && <DamageSmoke severity={0.65} position={[0, 3.3, 0]} />}
     </group>
   );
 }
@@ -431,12 +436,14 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   const meFusion = connected ? network.players.find((p) => p.id === network.id)?.fusion : null;
   const mePilot = connected ? network.players.find((p) => p.id === network.id) : me.current;
   const meOnFoot = Boolean(mePilot?.onFoot);
+  const myDamage = mePilot ? 1 - mePilot.armor / classOf(mePilot.cls || cls).armor : 0;
   return (
     <>
       <PlanetScene planet={planet} strikes={scene.strikes || []} />
       {meOnFoot && (
         <group position={mePilot.mechPosition} rotation={[0, mePilot.mechHeading || 0, 0]}>
           <Mech paint={paint} cls={cls} />
+          {myDamage >= 0.5 && <DamageSmoke severity={myDamage} position={[0, 3.5 * classOf(cls).scale, 0]} />}
         </group>
       )}
       {mode !== 2 && meFusion?.role !== "gunner" && (
@@ -449,6 +456,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
             pitch={aimPitch}
             thrust={controls.current.has("f") && !meDown}
           />}
+          {!meOnFoot && myDamage >= 0.5 && <DamageSmoke severity={myDamage} position={[0, 3.5 * classOf(cls).scale, 0]} />}
         </group>
       )}
       {network.players
