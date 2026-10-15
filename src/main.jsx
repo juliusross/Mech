@@ -29,6 +29,7 @@ import {
   REPAIR_COOLDOWN,
 } from "../shared/arena.js";
 import { planetOf, FUSE_SCALE } from "../shared/planets.js";
+import { terrainHeight, WORLD_EDGE } from "../shared/terrain.js";
 import {
   createWorld,
   createPilot,
@@ -298,11 +299,11 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
     if (!connected && me.current.cls !== cls) setClass(me.current, cls);
     if (pressed(k, "x")) {
       if (down || fusion) notice.current = { text: "Cannot leave the Titan right now", until: now + 2500 };
-      else if (!onFoot && pos.current.y > 0.2) notice.current = { text: "Land before exiting your Titan", until: now + 2500 };
+      else if (!onFoot && pos.current.y > terrainHeight(planet, pos.current.x, pos.current.z) + 0.2) notice.current = { text: "Land before exiting your Titan", until: now + 2500 };
       else if (onFoot && pos.current.distanceTo(new THREE.Vector3(...(connected ? pilot?.mechPosition || pos.current.toArray() : me.current.mechPosition))) > 4.5)
         notice.current = { text: "Move closer to your Titan to enter", until: now + 2500 };
       else if (connected) network.sendInteract();
-      else if (toggleMech(me.current, yaw.current)) {
+      else if (toggleMech(me.current, yaw.current, planet)) {
         pos.current.set(...me.current.position);
         vel.current.set(0, 0, 0);
         velY.current = 0;
@@ -345,11 +346,12 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       if (!onFoot && flying) velY.current = 7;
       else if (!onFoot && k.has("control")) velY.current = -7;
       else velY.current -= P.gravity * dt;
-      if (k.has(" ") && pos.current.y < 0.02) velY.current = onFoot ? 5.5 : 9;
-      pos.current.y = Math.max(0, Math.min(onFoot ? 3.5 : 45, pos.current.y + velY.current * dt));
-      if (pos.current.y === 0) velY.current = Math.max(0, velY.current);
-      pos.current.x = THREE.MathUtils.clamp(pos.current.x, -65, 65);
-      pos.current.z = THREE.MathUtils.clamp(pos.current.z, -85, 65);
+      pos.current.x = THREE.MathUtils.clamp(pos.current.x, -WORLD_EDGE, WORLD_EDGE);
+      pos.current.z = THREE.MathUtils.clamp(pos.current.z, -WORLD_EDGE, WORLD_EDGE);
+      const ground = terrainHeight(planet, pos.current.x, pos.current.z);
+      if (k.has(" ") && pos.current.y <= ground + 0.05) velY.current = onFoot ? 5.5 : 9;
+      pos.current.y = Math.max(ground, Math.min(ground + (onFoot ? 3.5 : 45), pos.current.y + velY.current * dt));
+      if (pos.current.y === ground) velY.current = Math.max(0, velY.current);
     }
 
     // Firing toward the point under the crosshair.

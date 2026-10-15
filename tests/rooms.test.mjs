@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { WebSocket } from "ws";
 import { once } from "node:events";
 import { createRoomServer } from "../server/rooms.mjs";
+import { terrainHeight } from "../shared/terrain.js";
 
 const origin = "http://127.0.0.1:5174";
 async function setup(t, options) {
@@ -181,6 +182,23 @@ test("malformed and out-of-bounds movement cannot poison room state", async (t) 
   a.ws.send("{broken");
   const [code] = await closed;
   assert.equal(code, 1008);
+});
+
+test("rooms accept a pilot on the expanded hillside and reject a position below it", async (t) => {
+  const { connect, server } = await setup(t);
+  const a = await connect("create", "Explorer");
+  const welcome = await a.wait((m) => m.type === "welcome");
+  const player = server.rooms.get(welcome.room).players.get(welcome.id);
+  const x = -325, z = -315;
+  const y = terrainHeight("proving", x, z);
+  player.position = [x, y, z + 1];
+  player.updatedAt = Date.now() - 1000;
+  a.send({ type: "move", position: [x, 0, z], heading: 0 });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  assert.deepEqual(player.position, [x, y, z + 1]);
+  a.send({ type: "move", position: [x, y, z], heading: 0 });
+  await a.wait((m) => m.type === "snapshot" && m.players.some((p) => p.id === welcome.id && p.position[2] === z));
+  assert.deepEqual(player.position, [x, y, z]);
 });
 
 test("unapproved origins are refused", async (t) => {

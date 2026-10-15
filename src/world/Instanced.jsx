@@ -19,6 +19,9 @@ export function Instanced({ items, place, children, castShadow = true, receiveSh
     if (!mesh) return;
     items.forEach((it, i) => {
       const t = place(it, i);
+      // Terrain vegetation carries an elevation; structures without one retain
+      // their authored placement.
+      if (it.elevation) t.p[1] += it.elevation;
       e.set(...(t.r || [0, 0, 0]));
       q.setFromEuler(e);
       m4.compose(v.set(...t.p), q, s.set(...(t.s || [1, 1, 1])));
