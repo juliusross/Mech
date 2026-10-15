@@ -43,6 +43,7 @@ test("large enemy defeats create a shared drop that only one pilot collects", ()
   enemy.hp = 1;
   enemy.pos = [0, 0, -4];
   world.enemies = [enemy];
+  world.random = () => 0.4; // below the tank drop chance; picks DROP_TYPES[2]
   fire(world, a, [0, 1.4, 4], [0, 0, -1]);
   for (let now = 50; now <= 300; now += 50) step(world, [a, b], 0.05, now);
   assert.equal(enemy.hp, 0);
@@ -51,7 +52,7 @@ test("large enemy defeats create a shared drop that only one pilot collects", ()
   b.position = [...world.drops[0].p];
   step(world, [a, b], 0.05, 350);
   assert.equal(world.drops.length, 0);
-  assert.equal(a.special?.type, "sword");
+  assert.equal(a.special?.type, "cannon");
   assert.equal(b.special, null);
   assert.equal(view(world).drops.length, 0);
 });
@@ -373,4 +374,61 @@ test("each enemy type fires its own projectile and is destroyed by its own hit p
     assert.equal(enemy.hp, 0, `${type} destroyed after ${T.hp} hits`);
     assert.equal(pilot.score, T.score);
   }
+});
+
+import { setWeapon, DROP_CHANCE } from "../shared/sim.js";
+import { WEAPONS } from "../shared/arena.js";
+
+test("drop chance rises with enemy size and is random", () => {
+  assert.ok(DROP_CHANCE.soldier < DROP_CHANCE.vehicle && DROP_CHANCE.vehicle < DROP_CHANCE.tank);
+  for (const [type, chance] of Object.entries(DROP_CHANCE)) {
+    for (const roll of [chance - 0.01, chance + 0.01]) {
+      const world = createWorld(() => 0.5);
+      const pilot = createPilot([0, 0, 8]);
+      world.targets = [];
+      const e = { id: 1, type, slot: 0, pos: [0, ENEMY_TYPES[type].fly ? 3 : 0, -10], hp: 0.5, heading: 0, aim: 0, cooldown: 99, burstLeft: 0, burstTimer: 0 };
+      world.enemies = [e];
+      world.random = () => roll;
+      const c = [e.pos[0], e.pos[1] + ENEMY_TYPES[type].center, e.pos[2]];
+      fire(world, pilot, [c[0], c[1], c[2] + 5], [0, 0, -1]);
+      run(world, [pilot], 0.3);
+      assert.equal(e.hp, 0);
+      assert.equal(world.drops.length, roll < chance ? 1 : 0, `${type} at roll ${roll}`);
+    }
+  }
+});
+
+test("walking a Titan over infantry crushes them with a splat", () => {
+  const world = createWorld(fixed);
+  world.targets = [];
+  const pilot = createPilot([0, 0, 8]);
+  const soldier = { id: 1, type: "soldier", slot: 0, pos: [0.8, 0, 8.5], hp: 1, heading: 0, aim: 0, cooldown: 99, burstLeft: 0, burstTimer: 0 };
+  const tank = { id: 2, type: "tank", slot: 1, pos: [0.5, 0, 7.5], hp: 12, heading: 0, aim: 0, cooldown: 99, burstLeft: 0, burstTimer: 0 };
+  world.enemies = [soldier, tank];
+  step(world, [pilot], 0.01, 10);
+  assert.equal(soldier.hp, 0);
+  assert.equal(tank.hp, 12, "only infantry can be stepped on");
+  assert.equal(pilot.score, ENEMY_TYPES.soldier.score);
+  assert.ok(drainEvents(world).some((e) => e.kind === "splat"));
+  // Flying over them does nothing.
+  soldier.hp = 1;
+  pilot.position = [0.8, 6, 8.5];
+  step(world, [pilot], 0.01, 20);
+  assert.equal(soldier.hp, 1);
+});
+
+test("loadout weapons change damage, speed and explosions", () => {
+  for (const [id, w] of Object.entries(WEAPONS)) {
+    const world = createWorld(fixed);
+    const pilot = createPilot([0, 0, 8]);
+    setWeapon(pilot, id);
+    assert.equal(pilot.weapon, id);
+    fire(world, pilot, [0, 3, 0], [0, 0, -1]);
+    const shot = world.shots.at(-1);
+    assert.equal(shot.damage, w.damage);
+    assert.equal(shot.kind, w.kind);
+  }
+  const p = createPilot([0, 0, 0]);
+  setWeapon(p, "laser-sword");
+  assert.equal(p.weapon, "plasma", "unknown loadouts are ignored");
 });

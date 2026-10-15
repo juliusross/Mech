@@ -64,3 +64,14 @@ export const classOf = (id) => CLASSES[id] || CLASSES.assault;
 export const REPAIR_AMOUNT = 30;
 export const REPAIR_RANGE = 14;
 export const REPAIR_COOLDOWN = 10;
+
+// Hangar loadouts. Multipliers apply to the mech class's base fire interval,
+// damage and the standard bullet speed.
+export const WEAPONS = {
+  plasma: { name: "Plasma cannon", blurb: "Balanced bolts", rate: 1, damage: 1, speed: 1, spread: 0, kind: "normal" },
+  rail: { name: "Rail gun", blurb: "Slow, hard-hitting slugs (×3)", rate: 2.4, damage: 3, speed: 2.4, spread: 0, kind: "rail" },
+  minigun: { name: "Minigun", blurb: "Rapid, light rounds", rate: 0.4, damage: 0.5, speed: 1.1, spread: 0.035, kind: "minigun" },
+  rockets: { name: "Rocket pod", blurb: "Slow rockets that explode", rate: 2.8, damage: 2, speed: 0.6, spread: 0, kind: "rocket" },
+};
+export const WEAPON_IDS = Object.keys(WEAPONS);
+export const weaponOf = (id) => WEAPONS[id] || WEAPONS.plasma;

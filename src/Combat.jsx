@@ -197,3 +197,69 @@ export function Effect({ effect, onDone }) {
     </>
   );
 }
+
+// Blood for crushed or shot infantry: a ground decal that fades out, plus
+// droplets that spray outward and fall.
+const SPLAT_LIFE = { splat: 9, ouch: 4 };
+export function BloodSplat({ effect, onDone }) {
+  const big = effect.kind === "splat";
+  const group = useRef();
+  const drops = useRef(null);
+  const age = useRef(0);
+  const blobs = React.useMemo(
+    () =>
+      Array.from({ length: big ? 7 : 3 }, (_, i) => ({
+        x: (Math.random() - 0.5) * (big ? 2.4 : 0.9),
+        z: (Math.random() - 0.5) * (big ? 2.4 : 0.9),
+        r: (big ? 0.5 : 0.25) + Math.random() * (big ? 0.7 : 0.3),
+        s: 0.6 + Math.random() * 0.8,
+        a: Math.random() * Math.PI,
+      })),
+    [big],
+  );
+  const flying = React.useMemo(
+    () =>
+      Array.from({ length: big ? 16 : 7 }, () => {
+        const a = Math.random() * Math.PI * 2,
+          sp = 2 + Math.random() * (big ? 5 : 3);
+        return { p: new THREE.Vector3(0, big ? 0.3 : 0.9, 0), v: new THREE.Vector3(Math.cos(a) * sp, 2 + Math.random() * 4, Math.sin(a) * sp) };
+      }),
+    [big],
+  );
+  const life = SPLAT_LIFE[effect.kind];
+  useFrame((_, dt) => {
+    age.current += dt;
+    const t = age.current / life;
+    group.current?.children.forEach((m) => {
+      if (m.material && m.userData.decal) m.material.opacity = Math.min(0.92, (1 - t) * 1.6);
+    });
+    if (drops.current)
+      drops.current.children.forEach((m, i) => {
+        const d = flying[i];
+        if (d.p.y <= 0) return;
+        d.v.y -= 22 * dt;
+        d.p.addScaledVector(d.v, dt);
+        m.position.copy(d.p);
+        if (d.p.y <= 0) m.visible = false;
+      });
+    if (t >= 1) onDone(effect.id);
+  });
+  return (
+    <group ref={group} position={effect.p}>
+      {blobs.map((b, i) => (
+        <mesh key={i} userData={{ decal: true }} position={[b.x, 0.02 + i * 0.002, b.z]} rotation={[-Math.PI / 2, 0, b.a]} scale={[1, b.s, 1]}>
+          <circleGeometry args={[b.r, 14]} />
+          <meshStandardMaterial color="#6e0a0a" roughness={0.35} metalness={0.1} transparent opacity={0.92} depthWrite={false} polygonOffset polygonOffsetFactor={-2} />
+        </mesh>
+      ))}
+      <group ref={drops}>
+        {flying.map((_, i) => (
+          <mesh key={i}>
+            <sphereGeometry args={[big ? 0.09 : 0.06, 6, 5]} />
+            <meshBasicMaterial color="#8c0d0d" />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+}

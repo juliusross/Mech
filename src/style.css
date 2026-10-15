@@ -836,3 +836,15 @@ button:focus-visible {
     height: 260px;
   }
 }
+.weapon-cards {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.weapon-card {
+  padding: 8px 10px;
+}
+.weapon-card strong {
+  font-size: 13px;
+}

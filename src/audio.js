@@ -129,3 +129,28 @@ export const sfx = {
     tone({ type: "triangle", from: 1200, to: 900, dur: 0.05, peak: 0.08 });
   },
 };
+
+// Infantry voices: the browser's speech engine, pitched up for tiny soldiers.
+const OUCHES = ["Ouch!", "Ow!", "Ouch!", "Argh!", "Ouch!"];
+let lastOuch = 0;
+function say(level) {
+  try {
+    const now = performance.now();
+    if (!window.speechSynthesis || now - lastOuch < 250 || level <= 0.05) return;
+    lastOuch = now;
+    const u = new SpeechSynthesisUtterance(OUCHES[Math.floor(Math.random() * OUCHES.length)]);
+    u.pitch = 1.6 + Math.random() * 0.4;
+    u.rate = 1.35;
+    u.volume = Math.min(1, volume * level * 1.2);
+    window.speechSynthesis.speak(u);
+  } catch {}
+}
+sfx.splat = (level = 1) => {
+  burst({ dur: 0.22, peak: 0.35, from: 900, to: 120, level });
+  tone({ type: "sine", from: 140, to: 50, dur: 0.18, peak: 0.25, level });
+  say(level);
+};
+sfx.ouch = (level = 1) => {
+  burst({ dur: 0.08, peak: 0.12, filter: "bandpass", from: 1200, to: 600, level });
+  if (Math.random() < 0.7) say(level);
+};

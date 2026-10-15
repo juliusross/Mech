@@ -2,6 +2,7 @@ import React, { useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
+import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
 import { Drone } from "./Combat.jsx";
 import { Mech } from "./Mech.jsx";
 import { RoundedGeometry } from "./RoundedPart.jsx";
@@ -28,9 +29,9 @@ function Mover({ e, rate = 10, children }) {
   );
 }
 
-function Box({ size, position, color, rotation, metal = 0.5, rough = 0.55, glow }) {
+function Box({ size, position, color, rotation, metal = 0.5, rough = 0.55, glow, shadow = true }) {
   return (
-    <mesh position={position} rotation={rotation} castShadow receiveShadow>
+    <mesh position={position} rotation={rotation} castShadow={shadow} receiveShadow={shadow}>
       <RoundedGeometry size={size} radius={0.1} />
       <meshStandardMaterial
         color={color}
@@ -118,34 +119,88 @@ function Buggy({ e }) {
   );
 }
 
+// Infantry: jointed legs (thigh, shin, boot), arms (upper arm, forearm,
+// hand) holding a rifle, vest, belt, backpack with bedroll and a helmet.
+// Each body part is pre-merged into one vertex-coloured mesh so a squad costs
+// seven draw calls per soldier instead of ~30.
+const SOLDIER = (() => {
+  const C = { uniform: "#4f5b3c", gear: "#3b3f2f", skin: "#c99a72", boot: "#1f1c18", dark: "#1b1b1b", pack: "#55603f", roll: "#6d6650", helmet: "#3d4630", belt: "#2a2620" };
+  const piece = (geo, pos, rot, color) => {
+    const g = geo.toNonIndexed();
+    g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(...pos), new THREE.Quaternion().setFromEuler(new THREE.Euler(...(rot || [0, 0, 0]))), new THREE.Vector3(1, 1, 1)));
+    const c = new THREE.Color(color);
+    const cols = new Float32Array(g.attributes.position.count * 3);
+    for (let i = 0; i < cols.length; i += 3) cols.set([c.r, c.g, c.b], i);
+    g.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+    g.deleteAttribute("uv");
+    return g;
+  };
+  const box = (w, h, d) => new THREE.BoxGeometry(w, h, d);
+  const merge = (parts) => mergeGeometries(parts);
+  const body = merge([
+    piece(box(0.42, 0.5, 0.24), [0, 0.3, 0], null, C.uniform),
+    piece(box(0.46, 0.32, 0.28), [0, 0.36, 0], null, C.gear),
+    piece(box(0.44, 0.07, 0.27), [0, 0.06, 0], null, C.belt),
+    piece(box(0.1, 0.1, 0.06), [-0.12, 0.12, -0.15], null, C.gear),
+    piece(box(0.1, 0.1, 0.06), [0.12, 0.12, -0.15], null, C.gear),
+    piece(box(0.32, 0.4, 0.18), [0, 0.34, 0.22], null, C.pack),
+    piece(new THREE.CylinderGeometry(0.07, 0.07, 0.34, 8), [0, 0.59, 0.22], [0, 0, Math.PI / 2], C.roll),
+    piece(new THREE.CylinderGeometry(0.05, 0.06, 0.08, 6), [0, 0.66, 0], null, C.skin),
+    piece(new THREE.SphereGeometry(0.12, 10, 8), [0, 0.78, 0], null, C.skin),
+    piece(new THREE.SphereGeometry(0.145, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), [0, 0.83, 0], null, C.helmet),
+    piece(box(0.2, 0.04, 0.04), [0, 0.79, -0.11], null, C.dark),
+    piece(box(0.07, 0.11, 0.8), [0.06, 0.33, -0.42], null, C.dark),
+    piece(box(0.05, 0.16, 0.08), [0.06, 0.24, -0.3], null, C.dark),
+  ]);
+  const thigh = merge([piece(box(0.16, 0.46, 0.18), [0, -0.22, 0], null, C.uniform)]);
+  const shin = merge([
+    piece(box(0.15, 0.42, 0.16), [0, -0.21, 0], null, C.uniform),
+    piece(box(0.17, 0.11, 0.3), [0, -0.45, -0.05], null, C.boot),
+  ]);
+  // Arm in shoulder space: upper arm, then the forearm bent at the elbow, then the hand.
+  const arm = (side) => {
+    const elbow = new THREE.Matrix4().compose(new THREE.Vector3(0, -0.3, 0), new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.7, 0, side * 0.35)), new THREE.Vector3(1, 1, 1));
+    const fore = merge([
+      piece(box(0.1, 0.28, 0.11), [0, -0.14, 0], null, C.uniform),
+      piece(new THREE.SphereGeometry(0.05, 8, 6), [0, -0.3, 0], null, C.skin),
+    ]).applyMatrix4(elbow);
+    return merge([piece(box(0.11, 0.3, 0.12), [0, -0.15, 0], null, C.uniform), fore]);
+  };
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, metalness: 0 });
+  return { body, thigh, shin, arms: [arm(-1), arm(1)], material };
+})();
+
 function Soldier({ e }) {
-  const legs = useRef([]);
+  const hips = useRef();
+  const thighs = [useRef(), useRef()];
+  const shins = [useRef(), useRef()];
+  const arms = [useRef(), useRef()];
   const phase = useRef(Math.random() * 6);
   useFrame((_, dt) => {
     phase.current += dt * 9;
-    const s = Math.sin(phase.current) * 0.6;
-    if (legs.current[0]) legs.current[0].rotation.x = s;
-    if (legs.current[1]) legs.current[1].rotation.x = -s;
+    const s = Math.sin(phase.current);
+    thighs.forEach((t, i) => t.current && (t.current.rotation.x = (i ? -s : s) * 0.55));
+    shins.forEach((t, i) => t.current && (t.current.rotation.x = Math.max(0, i ? s : -s) * 0.9));
+    arms.forEach((a, i) => a.current && (a.current.rotation.x = -0.95 + (i ? s : -s) * 0.08));
+    if (hips.current) hips.current.position.y = 0.95 + Math.abs(s) * 0.04;
   });
-  const uniform = "#4f5b3c";
+  const M = SOLDIER.material;
   return (
-    <group>
-      {[-0.12, 0.12].map((x, i) => (
-        <group key={x} ref={(g) => (legs.current[i] = g)} position={[x, 0.75, 0]}>
-          <Box size={[0.17, 0.75, 0.2]} position={[0, -0.37, 0]} color={uniform} metal={0} rough={0.9} />
+    <group ref={hips} position={[0, 0.95, 0]}>
+      <mesh geometry={SOLDIER.body} material={M} castShadow />
+      {[-0.11, 0.11].map((x, i) => (
+        <group key={x} ref={thighs[i]} position={[x, 0, 0]}>
+          <mesh geometry={SOLDIER.thigh} material={M} />
+          <group ref={shins[i]} position={[0, -0.45, 0]}>
+            <mesh geometry={SOLDIER.shin} material={M} />
+          </group>
         </group>
       ))}
-      <Box size={[0.48, 0.6, 0.3]} position={[0, 1.05, 0]} color={uniform} metal={0} rough={0.9} />
-      <Box size={[0.3, 0.38, 0.22]} position={[0, 1.05, 0.22]} color="#3b3f2f" metal={0} rough={0.9} />
-      <mesh position={[0, 1.52, 0]} castShadow>
-        <sphereGeometry args={[0.15, 10, 8]} />
-        <meshStandardMaterial color="#c99a72" roughness={0.8} />
-      </mesh>
-      <mesh position={[0, 1.6, 0]} castShadow>
-        <sphereGeometry args={[0.18, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2]} />
-        <meshStandardMaterial color="#3d4630" roughness={0.8} />
-      </mesh>
-      <Box size={[0.08, 0.08, 0.75]} position={[0.2, 1.1, -0.3]} color="#1b1b1b" metal={0.8} />
+      {[-1, 1].map((side, i) => (
+        <group key={side} ref={arms[i]} position={[side * 0.27, 0.5, 0]} rotation={[-0.95, 0, side * -0.15]}>
+          <mesh geometry={SOLDIER.arms[i]} material={M} />
+        </group>
+      ))}
     </group>
   );
 }

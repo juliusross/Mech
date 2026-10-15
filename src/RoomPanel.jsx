@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { CLASSES } from "../shared/arena.js";
 import { PLANETS, PLANET_IDS, planetOf } from "../shared/planets.js";
 export function RoomPanel({ network, settings, startOpen }) {
-  const { cls, paint } = settings;
+  const { cls, paint, weapon } = settings;
   const [name, setName] = useState(settings.name);
   const [versus, setVersus] = useState(false);
   const [planet, setPlanet] = useState(settings.planet);
@@ -101,7 +101,7 @@ export function RoomPanel({ network, settings, startOpen }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            network.connect("join", name, room, { cls, paint });
+            network.connect("join", name, room, { cls, paint, weapon });
           }}
         >
           <label>
@@ -138,7 +138,7 @@ export function RoomPanel({ network, settings, startOpen }) {
           <button
             type="button"
             disabled={busy || !name.trim() || !network.available}
-            onClick={() => network.connect("create", name, "", { cls, paint, pvp: versus, planet })}
+            onClick={() => network.connect("create", name, "", { cls, paint, weapon, pvp: versus, planet })}
           >
             Create private room
           </button>

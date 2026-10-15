@@ -1,7 +1,7 @@
 import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
-import { MAX_AMMO, CLASSES, classOf } from "../shared/arena.js";
+import { MAX_AMMO, CLASSES, classOf, WEAPONS, weaponOf } from "../shared/arena.js";
 import { PLANETS, cleanPaint } from "../shared/planets.js";
 import { POWERUPS } from "../shared/powerups.js";
 import { terrainHeight, WORLD_EDGE } from "../shared/terrain.js";
@@ -10,6 +10,7 @@ import {
   createPilot,
   toggleMech,
   setClass,
+  setWeapon,
   fire,
   repair,
   requestFuse,
@@ -80,6 +81,7 @@ export function createRoomServer({
       special: p.special ? { ...p.special, until: Math.max(0, p.special.until - Date.now()) } : null,
       down: Boolean(p.downUntil),
       cls: p.cls,
+      weapon: p.weapon,
       paint: p.paint,
       fusion: p.fusion
         ? {
@@ -196,6 +198,7 @@ export function createRoomServer({
           ammo: MAX_AMMO,
           firedAt: 0,
           paint: cleanPaint(data.paint),
+          weapon: WEAPONS[data.weapon] ? data.weapon : "plasma",
         };
         room.players.set(player.id, player);
         clearTimeout(joinTimer);
@@ -273,7 +276,9 @@ export function createRoomServer({
         if (Math.hypot(...o.map((v, i) => v - player.position[i])) > 8) return;
         if (player.special?.type === "sword" && now >= player.special.until) player.special = null;
         const special = player.special?.type;
-        const interval = special ? POWERUPS[special]?.interval : classOf(player.cls).fireInterval;
+        const interval = special
+          ? POWERUPS[special]?.interval
+          : classOf(player.cls).fireInterval * weaponOf(player.weapon).rate;
         if ((!special && player.ammo <= 0) || now - player.firedAt < (interval || 0.16) * 900)
           return;
         if (!special) player.ammo--;
@@ -288,6 +293,9 @@ export function createRoomServer({
         room.dirty = true;
       } else if (data.type === "fuse") {
         if (requestFuse(room.world, player, now)) room.dirty = true;
+      } else if (data.type === "weapon") {
+        setWeapon(player, data.weapon);
+        room.dirty = true;
       } else if (data.type === "class") {
         if (player.fusion) return;
         if (!CLASSES[data.cls]) return;
