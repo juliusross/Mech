@@ -170,6 +170,7 @@ export function useMultiplayer() {
   const sendClass = useCallback((cls) => send({ type: "class", cls }), [send]);
   const sendRepair = useCallback(() => send({ type: "repair" }), [send]);
   const sendFuse = useCallback(() => send({ type: "fuse" }), [send]);
+  const sendInteract = useCallback(() => send({ type: "interact" }), [send]);
   const sendPaint = useCallback((paint) => send({ type: "paint", paint }), [send]);
   const onEvents = useCallback((listener) => {
     eventListeners.current.add(listener);
@@ -186,6 +187,7 @@ export function useMultiplayer() {
     sendClass,
     sendRepair,
     sendFuse,
+    sendInteract,
     sendPaint,
     onEvents,
     onShot,

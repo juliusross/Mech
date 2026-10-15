@@ -6,6 +6,7 @@ import { PLANETS, cleanPaint } from "../shared/planets.js";
 import {
   createWorld,
   createPilot,
+  toggleMech,
   setClass,
   fire,
   repair,
@@ -66,6 +67,9 @@ export function createRoomServer({
       color: p.color,
       position: p.position,
       heading: p.heading,
+      onFoot: p.onFoot,
+      mechPosition: p.mechPosition,
+      mechHeading: p.mechHeading,
       ammo: p.ammo,
       score: p.score,
       armor: p.armor,
@@ -203,6 +207,11 @@ export function createRoomServer({
       } else if (player.downUntil) {
         // A downed Titan cannot move or fire until it reboots at its spawn.
         return;
+      } else if (data.type === "interact") {
+        if (toggleMech(player, player.heading)) {
+          player.updatedAt = now;
+          room.dirty = true;
+        }
       } else if (data.type === "move" && player.fusion?.gunner === player) {
         // The gunner rides inside the driver's Titan; only its aim matters.
         if (Number.isFinite(data.heading)) player.heading = data.heading;
@@ -220,23 +229,28 @@ export function createRoomServer({
           p[0] < -65 ||
           p[0] > 65 ||
           p[1] < 0 ||
-          p[1] > 45 ||
+          p[1] > (player.onFoot ? 3.5 : 45) ||
           p[2] < -85 ||
           p[2] > 65
         )
           return;
         // Movement is client-predicted in this milestone; reject extreme jumps.
         const distance = Math.hypot(...p.map((v, i) => v - player.position[i]));
-        if (distance > 60 * Math.min(2, (now - player.updatedAt) / 1000) + 2)
+        if (distance > (player.onFoot ? 14 : 60) * Math.min(2, (now - player.updatedAt) / 1000) + 2)
           return;
         player.position = p;
         player.heading = Math.atan2(
           Math.sin(data.heading),
           Math.cos(data.heading),
         );
+        if (!player.onFoot) {
+          player.mechPosition = [...p];
+          player.mechHeading = player.heading;
+        }
         player.updatedAt = now;
         room.dirty = true;
       } else if (data.type === "fire") {
+        if (player.onFoot) return;
         // Shots are simulated here; clients only draw tracers.
         const o = data.origin,
           d = data.dir;
@@ -278,6 +292,7 @@ export function createRoomServer({
         if (repair(room.world, player, [...room.players.values()], now))
           room.dirty = true;
       } else if (data.type === "reload") {
+        if (player.onFoot) return;
         player.ammo = MAX_AMMO;
         room.dirty = true;
       }

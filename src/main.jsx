@@ -7,6 +7,8 @@ import { Html } from "@react-three/drei";
 import { useMultiplayer } from "./multiplayer";
 import { RoomPanel } from "./RoomPanel";
 import { Mech } from "./Mech.jsx";
+import { Pilot } from "./Pilot.jsx";
+import { RoundedGeometry } from "./RoundedPart.jsx";
 import { PlanetScene } from "./Planet.jsx";
 import { Effect } from "./Combat.jsx";
 import { Enemy, EnemyBolt } from "./Enemies.jsx";
@@ -28,6 +30,7 @@ import { planetOf, FUSE_SCALE } from "../shared/planets.js";
 import {
   createWorld,
   createPilot,
+  toggleMech,
   setClass,
   fire,
   repair,
@@ -56,31 +59,58 @@ function RemoteMech({ pilot }) {
   const fused = pilot.fusion?.role === "driver";
   const scale = classOf(pilot.cls).scale * (fused ? FUSE_SCALE : 1);
   return (
-    <group ref={group} position={initial.current}>
-      <Mech paint={pilot.paint} cls={pilot.cls} down={pilot.down} fused={fused} thrust={pilot.position[1] > 0.4} />
-      <Html position={[0, 5.9 * scale, 0]} center style={{ pointerEvents: "none" }}>
-        <span className="pilot-label">
-          {pilot.name}
-          {fused ? " ⚡ FUSED" : ""}
-        </span>
-      </Html>
-    </group>
+    <>
+      <group ref={group} position={initial.current}>
+        {pilot.onFoot ? (
+          <Pilot paint={pilot.paint} />
+        ) : (
+          <Mech paint={pilot.paint} cls={pilot.cls} down={pilot.down} fused={fused} thrust={pilot.position[1] > 0.4} />
+        )}
+        <Html position={[0, pilot.onFoot ? 2.7 : 5.9 * scale, 0]} center style={{ pointerEvents: "none" }}>
+          <span className="pilot-label">
+            {pilot.name}
+            {fused ? " ⚡ FUSED" : ""}
+          </span>
+        </Html>
+      </group>
+      {pilot.onFoot && (
+        <group position={pilot.mechPosition} rotation={[0, pilot.mechHeading || 0, 0]}>
+          <Mech paint={pilot.paint} cls={pilot.cls} />
+        </group>
+      )}
+    </>
   );
 }
 
 function Target({ t }) {
   return (
     <group position={[t.x, 0, t.z]}>
-      <mesh position={[0, 1.8, 0]} castShadow receiveShadow>
-        <boxGeometry args={[2.5, 3.6, 2.5]} />
+      <mesh position={[0, 0.24, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[1.5, 1.75, 0.48, 12]} />
+        <meshStandardMaterial color="#313b41" metalness={0.65} roughness={0.53} />
+      </mesh>
+      <mesh position={[0, 1.85, 0]} castShadow receiveShadow>
+        <RoundedGeometry size={[2.25, 3.25, 1.55]} radius={0.38} />
         <meshStandardMaterial
-          color={t.hp === 3 ? "#c4564c" : t.hp === 2 ? "#df9c4d" : "#f6d46e"}
-          metalness={0.5}
-          roughness={0.45}
+          color={t.hp === 3 ? "#6e3432" : t.hp === 2 ? "#9c5a34" : "#a58a4d"}
+          metalness={0.58}
+          roughness={0.54}
         />
       </mesh>
-      <mesh position={[0, 3.9, 0]}>
-        <sphereGeometry args={[0.45, 12, 12]} />
+      <mesh position={[0, 2.05, 0.85]} castShadow>
+        <RoundedGeometry size={[1.18, 1.15, 0.18]} radius={0.14} />
+        <meshStandardMaterial color="#212e36" metalness={0.75} roughness={0.35} />
+      </mesh>
+      <mesh position={[0, 2.05, 0.96]}>
+        <circleGeometry args={[0.32, 24]} />
+        <meshStandardMaterial color="#ff8a59" emissive="#f04b23" emissiveIntensity={2.5} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh position={[0, 3.55, 0]} castShadow>
+        <cylinderGeometry args={[0.25, 0.25, 0.6, 10]} />
+        <meshStandardMaterial color="#48565e" metalness={0.7} roughness={0.42} />
+      </mesh>
+      <mesh position={[0, 3.98, 0]}>
+        <sphereGeometry args={[0.22, 12, 10]} />
         <meshStandardMaterial color="#ff4949" emissive="#b31818" emissiveIntensity={2} />
       </mesh>
     </group>
@@ -135,6 +165,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   live.current = { targets: shownTargets, enemies: scene.enemies };
   const wasDown = useRef(false);
   const wasGunner = useRef(false);
+  const wasOnFoot = useRef(false);
   const lastHud = useRef("");
   const held = useRef(new Set());
   const repairReady = useRef(0);
@@ -189,6 +220,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
     const pilot = connected ? network.players.find((p) => p.id === network.id) : me.current;
     const down = connected ? Boolean(pilot?.down) : me.current.downUntil > 0;
     const fusion = connected ? pilot?.fusion : null;
+    const onFoot = connected ? Boolean(pilot?.onFoot) : me.current.onFoot;
     const gunner = fusion?.role === "gunner";
     const driver = fusion?.role === "driver";
     const spec = classOf(cls);
@@ -200,8 +232,14 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       bullets.current = [];
     }
     if (wasGunner.current && !gunner && pilot) pos.current.set(...pilot.position);
+    if (connected && wasOnFoot.current !== onFoot && pilot) {
+      pos.current.set(...pilot.position);
+      vel.current.set(0, 0, 0);
+      velY.current = 0;
+    }
     wasDown.current = down;
     wasGunner.current = gunner;
+    wasOnFoot.current = onFoot;
 
     // Aim: mouse or touch deltas accumulated by App.
     const a = aim.current;
@@ -220,12 +258,24 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
     const aimDir = forward.clone().multiplyScalar(Math.cos(pitch.current)).setY(Math.sin(pitch.current));
 
     if (!connected && me.current.cls !== cls) setClass(me.current, cls);
-    if (pressed(k, "g") && spec.repair && now >= repairReady.current) {
+    if (pressed(k, "x")) {
+      if (down || fusion) notice.current = { text: "Cannot leave the Titan right now", until: now + 2500 };
+      else if (!onFoot && pos.current.y > 0.2) notice.current = { text: "Land before exiting your Titan", until: now + 2500 };
+      else if (onFoot && pos.current.distanceTo(new THREE.Vector3(...(connected ? pilot?.mechPosition || pos.current.toArray() : me.current.mechPosition))) > 4.5)
+        notice.current = { text: "Move closer to your Titan to enter", until: now + 2500 };
+      else if (connected) network.sendInteract();
+      else if (toggleMech(me.current, yaw.current)) {
+        pos.current.set(...me.current.position);
+        vel.current.set(0, 0, 0);
+        velY.current = 0;
+      }
+    }
+    if (!onFoot && pressed(k, "g") && spec.repair && now >= repairReady.current) {
       if (connected) network.sendRepair();
       else repair(solo.current, me.current, [me.current], now);
       repairReady.current = now + REPAIR_COOLDOWN * 1000;
     }
-    if (pressed(k, "v")) {
+    if (!onFoot && pressed(k, "v")) {
       if (connected) {
         network.sendFuse();
         notice.current = { text: "Fusion requested · a squadmate within 8 m must press V too", until: now + 3000 };
@@ -243,21 +293,21 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       if (k.has("d") || k.has("arrowright")) move.add(right);
       if (k.has("a") || k.has("arrowleft")) move.sub(right);
       if (move.lengthSq()) move.normalize();
-      if (k.has("shift") && dodge.current <= 0) {
+      if (!onFoot && k.has("shift") && dodge.current <= 0) {
         dodge.current = spec.dodgeCooldown;
         burst.current = 0.22;
       }
-      const speed = (burst.current > 0 ? spec.speed * 2.8 : spec.speed) * (driver ? 0.85 : 1);
+      const speed = onFoot ? (k.has("shift") ? 8 : 5) : (burst.current > 0 ? spec.speed * 2.8 : spec.speed) * (driver ? 0.85 : 1);
       burst.current -= dt;
       dodge.current -= dt;
       // Grip below 1 (ice) makes the Titan slide toward its intended velocity.
-      vel.current.lerp(move.multiplyScalar(speed), Math.min(1, dt * 12 * P.grip));
+      vel.current.lerp(move.multiplyScalar(speed), Math.min(1, dt * (onFoot ? 16 : 12) * P.grip));
       pos.current.addScaledVector(vel.current, dt);
-      if (flying) velY.current = 7;
-      else if (k.has("control")) velY.current = -7;
+      if (!onFoot && flying) velY.current = 7;
+      else if (!onFoot && k.has("control")) velY.current = -7;
       else velY.current -= P.gravity * dt;
-      if (k.has(" ") && pos.current.y < 0.02) velY.current = 9;
-      pos.current.y = Math.max(0, Math.min(45, pos.current.y + velY.current * dt));
+      if (k.has(" ") && pos.current.y < 0.02) velY.current = onFoot ? 5.5 : 9;
+      pos.current.y = Math.max(0, Math.min(onFoot ? 3.5 : 45, pos.current.y + velY.current * dt));
       if (pos.current.y === 0) velY.current = Math.max(0, velY.current);
       pos.current.x = THREE.MathUtils.clamp(pos.current.x, -65, 65);
       pos.current.z = THREE.MathUtils.clamp(pos.current.z, -85, 65);
@@ -269,7 +319,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       ammo.current = pilot.ammo;
       onAmmo(pilot.ammo);
     }
-    if (k.has("mouse") && cooldown.current <= 0 && ammo.current > 0) {
+    if (!onFoot && k.has("mouse") && cooldown.current <= 0 && ammo.current > 0) {
       ammo.current--;
       onAmmo(ammo.current);
       cooldown.current = spec.fireInterval;
@@ -304,6 +354,10 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       network.sendMovement(pos.current.toArray(), yaw.current);
     } else if (!paused) {
       me.current.position = pos.current.toArray();
+      if (!me.current.onFoot) {
+        me.current.mechPosition = [...me.current.position];
+        me.current.mechHeading = yaw.current;
+      }
       step(solo.current, [me.current], dt, now);
       const events = drainEvents(solo.current);
       if (events.length) addEffects(events);
@@ -341,6 +395,8 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       pvp: Boolean(scene.pvp),
       planet,
       fusion: fusion ? { role: fusion.role, left: Math.ceil(fusion.left / 1000) } : null,
+      onFoot,
+      nearMech: onFoot && pos.current.distanceTo(new THREE.Vector3(...(pilot?.mechPosition || me.current.mechPosition))) <= 4.5,
       fuseIn: connected && pilot ? Math.ceil((pilot.fuseReady || 0) / 1000) : null,
       notice: notice.current.until > now ? notice.current.text : "",
     };
@@ -354,16 +410,16 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
     setAimPitch(pitch.current);
 
     // Camera: orbit behind the Titan, looking where the crosshair aims.
-    const chest = pos.current.clone().add(new THREE.Vector3(0, 3 * sc, 0));
+    const chest = pos.current.clone().add(new THREE.Vector3(0, onFoot ? 1.55 : 3 * sc, 0));
     let desired, look;
     if (mode === 2) {
-      desired = pos.current.clone().add(new THREE.Vector3(0, 4.6 * sc, -0.6 * sc).applyAxisAngle(UP, yaw.current));
+      desired = pos.current.clone().add(new THREE.Vector3(0, onFoot ? 1.8 : 4.6 * sc, onFoot ? -0.2 : -0.6 * sc).applyAxisAngle(UP, yaw.current));
       look = desired.clone().addScaledVector(aimDir, 30);
     } else {
-      const base = mode === 0 ? new THREE.Vector3(0, 6, 14) : new THREE.Vector3(3.2, 4.6, 8.5);
+      const base = onFoot ? (mode === 0 ? new THREE.Vector3(0, 3, 5.8) : new THREE.Vector3(1.2, 2.5, 3.4)) : mode === 0 ? new THREE.Vector3(0, 6, 14) : new THREE.Vector3(3.2, 4.6, 8.5);
       base.y -= pitch.current * 6;
       base.z -= Math.max(0, pitch.current) * 3;
-      desired = pos.current.clone().add(base.multiplyScalar(Math.max(1, sc)).applyAxisAngle(UP, yaw.current));
+      desired = pos.current.clone().add(base.multiplyScalar(onFoot ? 1 : Math.max(1, sc)).applyAxisAngle(UP, yaw.current));
       desired.y = Math.max(0.8, desired.y);
       look = chest.clone().addScaledVector(aimDir, 30);
     }
@@ -373,19 +429,26 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
 
   const meDown = wasDown.current;
   const meFusion = connected ? network.players.find((p) => p.id === network.id)?.fusion : null;
+  const mePilot = connected ? network.players.find((p) => p.id === network.id) : me.current;
+  const meOnFoot = Boolean(mePilot?.onFoot);
   return (
     <>
       <PlanetScene planet={planet} strikes={scene.strikes || []} />
+      {meOnFoot && (
+        <group position={mePilot.mechPosition} rotation={[0, mePilot.mechHeading || 0, 0]}>
+          <Mech paint={paint} cls={cls} />
+        </group>
+      )}
       {mode !== 2 && meFusion?.role !== "gunner" && (
         <group position={visual} rotation={[0, angle, 0]}>
-          <Mech
+          {meOnFoot ? <Pilot paint={paint} moving={vel.current.lengthSq() > 0.4} /> : <Mech
             paint={paint}
             cls={cls}
             down={meDown}
             fused={meFusion?.role === "driver"}
             pitch={aimPitch}
             thrust={controls.current.has("f") && !meDown}
-          />
+          />}
         </group>
       )}
       {network.players
@@ -456,7 +519,9 @@ function App() {
   const [hud, setHud] = useState(null);
   const [hit, setHit] = useState(0);
   const lastArmor = useRef(Infinity);
+  const onFootState = useRef(false);
   const onHud = (next) => {
+    onFootState.current = next.onFoot;
     if (next.armor < lastArmor.current && lastArmor.current !== Infinity) {
       setHit((n) => n + 1);
       sfx.hurt();
@@ -489,7 +554,7 @@ function App() {
         return;
       }
       if ([" ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) e.preventDefault();
-      if ((e.key === "r" || e.key === "R") && playing) {
+      if ((e.key === "r" || e.key === "R") && playing && !onFootState.current) {
         setAmmo(MAX_AMMO);
         network.sendReload();
         window.dispatchEvent(new CustomEvent("mechverse-reload"));
@@ -655,6 +720,7 @@ function App() {
             </strong>
             <small>
               {P.name.toUpperCase()} · {spec.name.toUpperCase()}
+              {hud?.onFoot ? " · ON FOOT" : ""}
               {hud?.pvp ? " · VERSUS" : ""}
             </small>
             <p>
@@ -685,6 +751,11 @@ function App() {
               <p>{hud.repairIn ? `Repair recharging · ${hud.repairIn}s` : "Repair ready · G"}</p>
             )}
             {hud?.notice && <p className="notice">{hud.notice}</p>}
+            <p className="pilot-prompt">
+              {hud?.onFoot
+                ? hud.nearMech ? "X · Enter your Titan" : "X · Enter when close to your Titan"
+                : "X · Exit your Titan when landed"}
+            </p>
             <div className="hud-buttons">
               <button onClick={() => setCamera((v) => (v + 1) % 3)}>
                 {["Third-person", "Shoulder", "First-person"][camera]}
@@ -720,11 +791,12 @@ function App() {
               </div>
             </div>
             <div className="actions">
-              {button("mouse", "FIRE")}
-              {button("f", "UP")}
-              {button("control", "DOWN")}
-              {button("shift", "DODGE")}
+              {!hud?.onFoot && button("mouse", "FIRE")}
+              {!hud?.onFoot && button("f", "UP")}
+              {!hud?.onFoot && button("control", "DOWN")}
+              {button("shift", hud?.onFoot ? "RUN" : "DODGE")}
               {button(" ", "JUMP")}
+              {button("x", hud?.onFoot ? "ENTER" : "EXIT")}
               {connected && button("v", "FUSE")}
               {spec.repair && button("g", "REPAIR")}
             </div>

@@ -97,6 +97,38 @@ test("room isolates players, relays movement, enforces four slots and cleans dep
   assert.equal(server.rooms.size, 0);
 });
 
+test("pilots leave landed Titans, move on foot, and re-enter only when nearby", async (t) => {
+  const { connect, server } = await setup(t);
+  const a = await connect("create", "Walker");
+  const welcome = await a.wait((m) => m.type === "welcome");
+  const b = await connect("join", "Witness", welcome.room);
+  await b.wait((m) => m.type === "welcome");
+  const player = server.rooms.get(welcome.room).players.get(welcome.id);
+  a.send({ type: "interact" });
+  const exited = await b.wait((m) => m.type === "snapshot" && m.players.find((p) => p.id === welcome.id)?.onFoot);
+  const remote = exited.players.find((p) => p.id === welcome.id);
+  assert.deepEqual(remote.mechPosition, [0, 0, 8]);
+  assert.deepEqual(remote.position, [2.8, 0, 8]);
+  a.send({ type: "fire", origin: [2.8, 1, 7], dir: [0, 0, -1] });
+  a.send({ type: "move", position: [40, 0, 8], heading: 0 });
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(player.ammo, 60, "pilots cannot fire the Titan cannon on foot");
+  assert.deepEqual(player.position, [2.8, 0, 8], "on-foot movement has its own speed limit");
+  player.position = [10, 0, 8];
+  a.send({ type: "interact" });
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(player.onFoot, true, "cannot enter from far away");
+  player.position = [3, 0, 8];
+  a.send({ type: "interact" });
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(player.onFoot, false);
+  assert.deepEqual(player.position, [0, 0, 8]);
+  player.position = [0, 1, 8];
+  a.send({ type: "interact" });
+  await new Promise((r) => setTimeout(r, 80));
+  assert.equal(player.onFoot, false, "must land before exiting");
+});
+
 test("invalid names, missing rooms, and room capacity return useful errors", async (t) => {
   const { connect } = await setup(t, { maxRooms: 1 });
   const invalid = await connect("create", " ");

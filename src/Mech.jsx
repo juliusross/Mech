@@ -3,6 +3,8 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { classOf } from "../shared/arena.js";
 import { DEFAULT_PAINT } from "../shared/planets.js";
+import { RoundedGeometry } from "./RoundedPart.jsx";
+import { armorMaps } from "./world/armorMaps.js";
 
 // Procedural Titans. Every class has its own body; they share one gait system
 // that reads walk speed from how far the mech actually moved, so remote pilots
@@ -12,9 +14,10 @@ const tmp = new THREE.Vector3();
 function Part({ size, position, rotation, color, metal = 0.65, rough = 0.42, emissive, glow = 0 }) {
   return (
     <mesh position={position} rotation={rotation} castShadow receiveShadow>
-      <boxGeometry args={size} />
+      <RoundedGeometry size={size} />
       <meshStandardMaterial
         color={color}
+        {...armorMaps()}
         metalness={metal}
         roughness={rough}
         emissive={emissive || "#000000"}

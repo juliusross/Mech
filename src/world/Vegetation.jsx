@@ -49,12 +49,12 @@ export function Trees({ trees, snowy }) {
         <meshStandardMaterial color="#5a4330" roughness={0.95} />
       </Instanced>
       <Instanced items={by.oak} place={P.oakCrown}>
-        <icosahedronGeometry args={[1, 1]} />
-        <meshStandardMaterial color="#ffffff" roughness={0.9} flatShading />
+        <sphereGeometry args={[1, 12, 8]} />
+        <meshStandardMaterial color="#ffffff" roughness={0.9} />
       </Instanced>
       <Instanced items={by.oak} place={P.oakCrown2}>
-        <icosahedronGeometry args={[1, 1]} />
-        <meshStandardMaterial color="#ffffff" roughness={0.9} flatShading />
+        <sphereGeometry args={[1, 12, 8]} />
+        <meshStandardMaterial color="#ffffff" roughness={0.9} />
       </Instanced>
 
       <Instanced items={by.pine} place={P.pineTrunk}>

@@ -47,6 +47,7 @@ export const maxArmor = (p) => classOf(p.cls).armor;
 const isGunner = (p) => p.fusion?.gunner === p;
 /** Hit-box scale: class size, enlarged while driving a fused Titan. */
 export function sizeOf(p) {
+  if (p.onFoot) return 0.32;
   return classOf(p.cls).scale * (p.fusion?.driver === p ? FUSE_SCALE : 1);
 }
 // A fused gunner rides inside the driver's Titan, so only the driver is hit.
@@ -56,6 +57,9 @@ export function createPilot(spawn, cls = "assault") {
   return {
     position: [...spawn],
     spawn: [...spawn],
+    mechPosition: [...spawn],
+    mechHeading: 0,
+    onFoot: false,
     cls: CLASSES[cls] ? cls : "assault",
     armor: classOf(cls).armor,
     downUntil: 0,
@@ -67,6 +71,27 @@ export function createPilot(spawn, cls = "assault") {
     fuseReadyAt: 0,
     burn: 0,
   };
+}
+
+/** The pilot can leave a landed Titan and re-enter it from nearby. */
+export function toggleMech(pilot, heading = 0) {
+  if (pilot.downUntil || pilot.fusion) return false;
+  if (pilot.onFoot) {
+    if (dist(pilot.position, pilot.mechPosition) > 4.5) return false;
+    pilot.position = [...pilot.mechPosition];
+    pilot.onFoot = false;
+  } else {
+    if (pilot.position[1] > 0.2) return false;
+    pilot.mechPosition = [...pilot.position];
+    pilot.mechHeading = heading;
+    pilot.position = [
+      clamp(pilot.position[0] + Math.cos(heading) * 2.8, -65, 65),
+      0,
+      clamp(pilot.position[2] - Math.sin(heading) * 2.8, -85, 65),
+    ];
+    pilot.onFoot = true;
+  }
+  return true;
 }
 
 export function setClass(pilot, cls) {
@@ -185,7 +210,7 @@ export function fire(world, pilot, origin, dir) {
 
 /** Support pulse: repairs the caster and every active pilot in range. */
 export function repair(world, pilot, pilots, now) {
-  if (!classOf(pilot.cls).repair || pilot.downUntil || now < pilot.repairAt)
+  if (!classOf(pilot.cls).repair || pilot.onFoot || pilot.downUntil || now < pilot.repairAt)
     return false;
   pilot.repairAt = now + REPAIR_COOLDOWN * 1000;
   for (const p of pilots)
@@ -197,7 +222,7 @@ export function repair(world, pilot, pilots, now) {
 
 /** Asks to fuse; two requests from nearby pilots within a few seconds pair up. */
 export function requestFuse(world, pilot, now) {
-  if (pilot.fusion || pilot.downUntil || now < pilot.fuseReadyAt) return false;
+  if (pilot.onFoot || pilot.fusion || pilot.downUntil || now < pilot.fuseReadyAt) return false;
   pilot.fuseAt = now;
   return true;
 }
@@ -261,6 +286,8 @@ export function step(world, pilots, dt, now) {
       p.downUntil = 0;
       p.armor = maxArmor(p);
       p.position = [...p.spawn];
+      p.mechPosition = [...p.spawn];
+      p.onFoot = false;
       p.respawns++;
       changed = true;
     }
