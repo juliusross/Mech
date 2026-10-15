@@ -1119,3 +1119,9 @@ button {
   font-size: clamp(26px, 6.2vw, 64px);
   white-space: nowrap;
 }
+.pad-test p {
+  font-size: 13px;
+  color: #bdbdbd;
+  margin: 4px 0;
+  word-break: break-word;
+}

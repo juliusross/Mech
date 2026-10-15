@@ -25,6 +25,18 @@ export const GAMEPAD_HELP = [
 ];
 
 const pressedOf = (b) => (typeof b === "object" ? b.pressed || b.value > 0.5 : b > 0.5);
+const active = (pad) => pad.buttons.some(pressedOf) || pad.axes.some((a) => Math.abs(a) > 0.5);
+
+// Some systems list extra "gamepads" (headsets, keyboards, stale Bluetooth
+// pairings) ahead of the real controller. Follow whichever pad was last used.
+let activeIndex = null;
+export function currentPad() {
+  const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+  if (!pads.length) return null;
+  const touched = pads.find(active);
+  if (touched) activeIndex = touched.index;
+  return pads.find((p) => p.index === activeIndex) || pads.find((p) => p.mapping === "standard") || pads[0];
+}
 
 function focusables() {
   const root = document.querySelector(".room-panel") || document.querySelector(".menu.pause") || document.querySelector(".menu");
@@ -53,7 +65,10 @@ export function useGamepad({ controls, aim, playing, sensitivity, invertY, onRel
   live.current = { playing, sensitivity, invertY, onReload, onPause, onCamera, onBack };
 
   useEffect(() => {
-    const on = (e) => setConnected(e.gamepad.id);
+    const on = (e) => {
+      activeIndex = e.gamepad.index;
+      setConnected(e.gamepad.id);
+    };
     const off = () => setConnected(null);
     window.addEventListener("gamepadconnected", on);
     window.addEventListener("gamepaddisconnected", off);
@@ -63,7 +78,7 @@ export function useGamepad({ controls, aim, playing, sensitivity, invertY, onRel
       raf = requestAnimationFrame(loop);
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      const pad = [...(navigator.getGamepads?.() || [])].find(Boolean);
+      const pad = currentPad();
       if (!pad) {
         // Release anything the pad was holding when it disconnects.
         for (const k of held.current) controls.current.delete(k);

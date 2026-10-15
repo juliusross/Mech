@@ -6,7 +6,7 @@ import { PAINT_PRESETS } from "./settings.js";
 import { Mech } from "./Mech.jsx";
 import { HangarBay } from "./HangarBay.jsx";
 import { sfx } from "./audio.js";
-import { GAMEPAD_HELP } from "./gamepad.js";
+import { GAMEPAD_HELP, currentPad } from "./gamepad.js";
 
 const CLASS_IDS = Object.keys(CLASSES);
 const maxOf = (k) => Math.max(...CLASS_IDS.map((id) => CLASSES[id][k]));
@@ -264,6 +264,50 @@ export function PlanetSelect({ settings, update, onBack, onLaunch, launchLabel =
   );
 }
 
+/** Live view of what the browser reports for the controller, for troubleshooting. */
+function ControllerTest() {
+  const [state, setState] = React.useState(null);
+  React.useEffect(() => {
+    let raf;
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      const all = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+      const pad = currentPad();
+      setState(
+        pad
+          ? {
+              count: all.length,
+              id: pad.id,
+              mapping: pad.mapping || "non-standard",
+              buttons: pad.buttons.map((b, i) => (b.pressed || b.value > 0.5 ? i : null)).filter((i) => i !== null),
+              axes: pad.axes.slice(0, 4).map((a) => a.toFixed(2)),
+            }
+          : null,
+      );
+    };
+    loop();
+    return () => cancelAnimationFrame(raf);
+  }, []);
+  return (
+    <div className="pad-test" aria-live="polite">
+      <h3>Controller</h3>
+      {state ? (
+        <>
+          <p>
+            Using: <strong>{state.id}</strong>
+            {state.count > 1 ? ` (${state.count} devices found; press a button on your controller to select it)` : ""}
+          </p>
+          <p>
+            Layout: {state.mapping} · Buttons held: {state.buttons.length ? state.buttons.join(", ") : "none"} · Sticks: {state.axes.join(" / ")}
+          </p>
+        </>
+      ) : (
+        <p>No controller detected. Connect it, then press any button (browsers hide controllers until a button is pressed).</p>
+      )}
+    </div>
+  );
+}
+
 export function Settings({ settings, update, onBack }) {
   return (
     <div className="menu settings">
@@ -313,6 +357,7 @@ export function Settings({ settings, update, onBack }) {
           />
           Invert vertical aim
         </label>
+        <ControllerTest />
         <h3>Controls</h3>
         <dl className="controls-list">
           <dt>Click arena</dt>
