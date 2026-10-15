@@ -95,7 +95,7 @@ Four simultaneous browser sessions, different physical computers, high-latency c
 
 ## Online hosting
 
-Room server: https://mechverse-rooms.onrender.com (Render free plan). The repository's Render blueprint now selects `main`, which contains the merged co-op and versus features. Verify that the existing Render service also selects `main` and has deployed the latest commit; changing this file alone does not update a running service. Free instances sleep after ~15 idle minutes, so the first connection may take up to a minute. Deployed web builds connect to this server by default; `VITE_MULTIPLAYER_URL` overrides that. To allow another site, add its exact origin to `ALLOWED_ORIGINS` in Render.
+Room server: https://mechverse-rooms.onrender.com (Render free plan). The repository's Render blueprint selects `main`, including the merged co-op, versus, planets, and fusion features. Verify that the existing Render service also selects `main` and has deployed the latest commit; changing this file alone does not update a running service. Free instances sleep after ~15 idle minutes, so the first connection may take up to a minute. Deployed web builds connect to this server by default; `VITE_MULTIPLAYER_URL` overrides that. To allow another site, add its exact origin to `ALLOWED_ORIGINS` in Render.
 
 ### Service settings
 
