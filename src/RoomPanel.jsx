@@ -1,15 +1,22 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { CLASSES } from "../shared/arena.js";
-export function RoomPanel({ network, cls }) {
-  const [name, setName] = useState("");
+import { PLANETS, PLANET_IDS, planetOf } from "../shared/planets.js";
+export function RoomPanel({ network, settings, startOpen }) {
+  const { cls, paint } = settings;
+  const [name, setName] = useState(settings.name);
   const [versus, setVersus] = useState(false);
+  const [planet, setPlanet] = useState(settings.planet);
   const [room, setRoom] = useState(
     () => new URLSearchParams(location.search).get("room") || "",
   );
   const [copyStatus, setCopyStatus] = useState("");
+  // Opening "Play with friends" from the menu expands the panel.
+  useEffect(() => {
+    if (startOpen) setOpen(true);
+  }, [startOpen]);
   // Phones start collapsed so the arena stays visible, unless an invite was opened.
   const [open, setOpen] = useState(
-    () => Boolean(room) || !matchMedia("(max-width: 600px)").matches,
+    () => startOpen || Boolean(room),
   );
   const busy = network.status === "connecting";
   const connected = network.status === "connected";
@@ -40,8 +47,8 @@ export function RoomPanel({ network, cls }) {
       <div className="room-body" hidden={!open && !network.error}>
       <p className="room-note">
         {connected && network.pvp
-          ? "Versus · Pilots and drones can hit you"
-          : "Squad defense · Clear targets and drones together"}
+          ? "Versus · Pilots and enemies can hit you"
+          : "Squad defense · Clear targets and enemies together"}
       </p>
       {network.error && (
         <p role="alert" className="room-error">
@@ -55,7 +62,7 @@ export function RoomPanel({ network, cls }) {
         <>
           <p>
             Room <strong>{network.room}</strong> · {network.players.length}/4
-            pilots · {network.pvp ? "Versus" : "Co-op"}
+            pilots · {network.pvp ? "Versus" : "Co-op"} · {planetOf(network.planet).name}
           </p>
           <ul>
             {network.players.map((p) => (
@@ -94,7 +101,7 @@ export function RoomPanel({ network, cls }) {
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            network.connect("join", name, room, { cls });
+            network.connect("join", name, room, { cls, paint });
           }}
         >
           <label>
@@ -109,6 +116,16 @@ export function RoomPanel({ network, cls }) {
               required
             />
           </label>
+          <label>
+            Planet
+            <select value={planet} onChange={(e) => setPlanet(e.target.value)} disabled={busy}>
+              {PLANET_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {PLANETS[id].name}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="check">
             <input
               type="checkbox"
@@ -121,7 +138,7 @@ export function RoomPanel({ network, cls }) {
           <button
             type="button"
             disabled={busy || !name.trim() || !network.available}
-            onClick={() => network.connect("create", name, "", { cls, pvp: versus })}
+            onClick={() => network.connect("create", name, "", { cls, paint, pvp: versus, planet })}
           >
             Create private room
           </button>

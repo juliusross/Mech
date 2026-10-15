@@ -1,5 +1,33 @@
 # Private-room multiplayer
 
+## Menus, planets, fusion, enemy roster and living worlds (October 15, 2026)
+
+- **Menus:** a main menu, a hangar (class cards with stat bars, rotating 3D preview, six paint presets plus three colour pickers), planet select, settings (name, volume, mouse sensitivity, invert Y) and a pause menu (Esc). Choices are saved per browser; the server receives class and paint so other pilots see them.
+- **Unique Titans:**
+  - Assault: humanoid.
+  - Scout: reverse-jointed runner with a glass canopy.
+  - Heavy: siege frame with missile pods and twin cannons.
+  - Support: four-legged medic with a radar dish and repair arms.
+  - All of them walk with animated legs and fire thrusters when flying.
+- **Mouse aiming:** click to lock the mouse. Shots go where the crosshair points, including up at drones. On touch screens, drag to aim.
+- **Enemies** (`shared/enemies.js`):
+  - Drones, infantry squads, gun buggies (burst fire), tanks (turret tracks you, heavy shells) and hostile mechs.
+  - Each type has its own health, speed, range, burst, aim spread and score.
+  - Waves mix in more types as they go; wave 3 has all five.
+- **Six planets**, each with hazards and its own scenery:
+  - Proving Grounds: daylight; town, city, highway, beach and ocean, construction site, forest.
+  - Ember: dusk; lava pools and rivers, ruined refinery town, smokestacks, volcano, ash and ember fall.
+  - Cryo: daylight; ice sliding, pine forest, frozen lake, alpine village, snowy highway, snowfall.
+  - Selene: night; low gravity, domed colony, habitat modules, landing pads, construction yards, craters, Earth in the sky.
+  - Tempest: storm; lightning zones, lit skyscraper city, elevated highway, river and bridge, rain with thunder.
+  - Verdant: hazy daylight; mist, jungle, river, beach, temples, stilt village, drizzle.
+  - The sun casts shadows on mechs, trees and buildings; shadows follow the camera.
+- **Fusion:** in a room, two pilots within 8 m both press V. The first to press drives and the second guns (triple damage). Armor is pooled for 20 s, then split proportionally; there is a 30 s cooldown. If the fused Titan is destroyed, both pilots go down.
+- **Sound:** synthesised effects for every action, with volume in Settings.
+- **Testing aid:** `?testwave=N` starts solo play at wave N.
+- **Verified:** 22 tests pass, the build passes, and a local room server sends enemies, planet and paint. In the browser: all four hangar models, all six planets, a wave-4 mix of enemies on Proving Grounds at about 118 fps, and no console errors.
+- **Not yet verified in the browser:** fusion between two live clients (covered by tests) and every enemy type up close (tanks were not seen close up).
+
 ## Classes, versus, effects and phone layout (October 14, 2026)
 
 - Four mech classes, chosen in the HUD (remembered per browser, switchable any time except while down; switching keeps your armor percentage):
