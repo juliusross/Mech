@@ -10,7 +10,7 @@ import { Mech } from "./Mech.jsx";
 import { Pilot } from "./Pilot.jsx";
 import { RoundedGeometry } from "./RoundedPart.jsx";
 import { PlanetScene } from "./Planet.jsx";
-import { Effect } from "./Combat.jsx";
+import { Effect, BloodSplat } from "./Combat.jsx";
 import { DamageSmoke } from "./DamageEffects.jsx";
 import { Enemy, EnemyBolt } from "./Enemies.jsx";
 import { ENEMY_TYPES } from "../shared/enemies.js";
@@ -27,6 +27,7 @@ import {
   hitsTarget,
   classOf,
   REPAIR_COOLDOWN,
+  weaponOf,
 } from "../shared/arena.js";
 import { planetOf, FUSE_SCALE } from "../shared/planets.js";
 import { terrainHeight, WORLD_EDGE } from "../shared/terrain.js";
@@ -40,6 +41,7 @@ import {
   step,
   view,
   drainEvents,
+  setWeapon,
 } from "../shared/sim.js";
 
 const INITIAL_TARGETS = TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
@@ -68,7 +70,7 @@ function RemoteMech({ pilot }) {
         {pilot.onFoot ? (
           <Pilot paint={pilot.paint} />
         ) : (
-          <Mech paint={pilot.paint} cls={pilot.cls} down={pilot.down} fused={fused} thrust={pilot.position[1] > 0.4} weapon={pilot.special?.type} />
+          <Mech paint={pilot.paint} cls={pilot.cls} down={pilot.down} fused={fused} thrust={pilot.position[1] > 0.4} weapon={pilot.special?.type} loadout={pilot.weapon} />
         )}
         {!pilot.onFoot && damage >= 0.5 && <DamageSmoke severity={damage} position={[0, 3.5 * scale, 0]} />}
         <Html position={[0, pilot.onFoot ? 2.7 : 5.9 * scale, 0]} center style={{ pointerEvents: "none" }}>
@@ -168,6 +170,8 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   const solo = useRef(null);
   if (!connected && !solo.current) {
     solo.current = createWorld(Math.random, { planet: soloPlanet });
+    // Development builds expose the solo world for browser testing.
+    if (import.meta.env.DEV) window.__mechverse = { world: solo.current, get me() { return me.current; } };
     // Testing aid: ?testwave=N starts solo play at wave N.
     const testWave = Number(new URLSearchParams(location.search).get("testwave"));
     if (testWave > 1) {
@@ -297,6 +301,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
     const aimDir = forward.clone().multiplyScalar(Math.cos(pitch.current)).setY(Math.sin(pitch.current));
 
     if (!connected && me.current.cls !== cls) setClass(me.current, cls);
+    if (!connected) setWeapon(me.current, settings.weapon);
     if (pressed(k, "x")) {
       if (down || fusion) notice.current = { text: "Cannot leave the Titan right now", until: now + 2500 };
       else if (!onFoot && pos.current.y > terrainHeight(planet, pos.current.x, pos.current.z) + 0.2) notice.current = { text: "Land before exiting your Titan", until: now + 2500 };
@@ -363,7 +368,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
     const specialType = pilot?.special?.type;
     if (!onFoot && k.has("mouse") && cooldown.current <= 0 && (specialType || ammo.current > 0)) {
       if (!specialType) { ammo.current--; onAmmo(ammo.current); }
-      cooldown.current = POWERUPS[specialType]?.interval || spec.fireInterval;
+      cooldown.current = POWERUPS[specialType]?.interval || spec.fireInterval * weaponOf(settings.weapon).rate;
       const muzzle = pos.current
         .clone()
         .add(new THREE.Vector3(1.4 * sc, 3.25 * sc, -2.2 * sc).applyAxisAngle(UP, yaw.current));
@@ -496,6 +501,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
             pitch={aimPitch}
             thrust={controls.current.has("f") && !meDown}
             weapon={mePilot?.special?.type}
+            loadout={settings.weapon}
           />}
           {!meOnFoot && myDamage >= 0.5 && <DamageSmoke severity={myDamage} position={[0, 3.5 * classOf(cls).scale, 0]} />}
         </group>
@@ -517,9 +523,13 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       {scene.bolts.map((b) => (
         <EnemyBolt key={b.id} bolt={b} />
       ))}
-      {effects.map((e) => (
-        <Effect key={e.id} effect={e} onDone={removeEffect} />
-      ))}
+      {effects.map((e) =>
+        e.kind === "splat" || e.kind === "ouch" ? (
+          <BloodSplat key={e.id} effect={e} onDone={removeEffect} />
+        ) : (
+          <Effect key={e.id} effect={e} onDone={removeEffect} />
+        ),
+      )}
       {bulletVisual.map((b) => (
         <mesh key={b.id} position={b.pos}>
           <sphereGeometry args={[b.kind === "cannon" ? 0.52 : b.kind === "shotgun" ? 0.15 : 0.22, 8, 8]} />
@@ -550,6 +560,9 @@ function App() {
   useEffect(() => {
     if (connected) network.sendPaint(settings.paint);
   }, [settings.paint, connected]);
+  useEffect(() => {
+    if (connected) network.sendWeapon(settings.weapon);
+  }, [settings.weapon, connected]);
   useEffect(() => setVolume(settings.volume), []);
 
   const inviteRoom = new URLSearchParams(location.search).get("room");

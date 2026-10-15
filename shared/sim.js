@@ -8,6 +8,8 @@ import {
   hitsTarget,
   CLASSES,
   classOf,
+  weaponOf,
+  WEAPONS,
   REPAIR_AMOUNT,
   REPAIR_RANGE,
   REPAIR_COOLDOWN,
@@ -68,6 +70,7 @@ export function createPilot(spawn, cls = "assault") {
     respawns: 0,
     score: 0,
     repairAt: 0,
+    weapon: "plasma",
     fusion: null,
     fuseAt: null,
     fuseReadyAt: 0,
@@ -98,6 +101,10 @@ export function toggleMech(pilot, heading = 0, planet = "proving") {
     pilot.onFoot = true;
   }
   return true;
+}
+
+export function setWeapon(pilot, weapon) {
+  if (WEAPONS[weapon]) pilot.weapon = weapon;
 }
 
 export function setClass(pilot, cls) {
@@ -199,23 +206,41 @@ function shoot(world, e, target) {
 const event = (world, kind, pos) =>
   world.events.push({ id: world.nextId++, kind, p: pos.map((v) => Math.round(v * 100) / 100) });
 
+// Small enemies rarely drop power-ups, medium ones sometimes, large ones often.
+export const DROP_CHANCE = { soldier: 0.06, drone: 0.08, vehicle: 0.22, tank: 0.45, mech: 0.45 };
 function dropFrom(world, enemy) {
-  if (enemy.type !== "tank" && enemy.type !== "mech") return;
-  if (world.random() >= 0.7) return;
+  if (world.random() >= (DROP_CHANCE[enemy.type] ?? 0)) return;
   const type = DROP_TYPES[Math.floor(world.random() * DROP_TYPES.length)];
   world.drops.push({ id: world.nextId++, type, p: [enemy.pos[0], 1.1, enemy.pos[2]] });
 }
 
-function defeatEnemy(world, enemy, credit) {
+function defeatEnemy(world, enemy, credit, how = "shot") {
   if (credit) credit.score += typeOf(enemy).score;
-  event(world, "boom", centerOf(enemy));
+  if (how === "stomp") event(world, "splat", [enemy.pos[0], enemy.pos[1] + 0.05, enemy.pos[2]]);
+  else if (enemy.type === "soldier") event(world, "ouch", centerOf(enemy));
+  else event(world, "boom", centerOf(enemy));
   dropFrom(world, enemy);
 }
 
-function hurtEnemy(world, enemy, amount, credit) {
+function hurtEnemy(world, enemy, amount, credit, how) {
   if (enemy.hp <= 0) return;
   enemy.hp = Math.max(0, enemy.hp - amount);
-  if (!enemy.hp) defeatEnemy(world, enemy, credit);
+  if (!enemy.hp) defeatEnemy(world, enemy, credit, how);
+}
+
+/** Titans crush infantry they walk over. */
+function stomp(world, pilots) {
+  let crushed = false;
+  for (const p of pilots) {
+    if (p.onFoot || p.downUntil || isGunner(p) || p.position[1] > 1.2) continue;
+    const reach = 1.5 * sizeOf(p);
+    for (const e of world.enemies)
+      if (e.type === "soldier" && e.hp > 0 && Math.hypot(e.pos[0] - p.position[0], e.pos[2] - p.position[2]) < reach) {
+        hurtEnemy(world, e, e.hp, p, "stomp");
+        crushed = true;
+      }
+  }
+  return crushed;
 }
 
 function hurtTarget(world, target, amount, credit) {
@@ -296,25 +321,26 @@ export function fire(world, pilot, origin, dir, pilots = [pilot]) {
     if (pilot.special.ammo <= 0) pilot.special = null;
     return "laser";
   }
-  const damage = classOf(pilot.cls).damage * (isGunner(pilot) ? FUSE_DAMAGE : 1);
+  const loadout = weaponOf(pilot.weapon);
+  const damage = classOf(pilot.cls).damage * loadout.damage * (isGunner(pilot) ? FUSE_DAMAGE : 1);
   const shots = active === "shotgun" ? 8 : 1;
   for (let i = 0; i < shots; i++) {
-    const spread = active === "shotgun" ? 0.13 : 0;
+    const spread = active === "shotgun" ? 0.13 : active ? 0 : loadout.spread;
     const direction = [dir[0] + (world.random() - 0.5) * 2 * spread, dir[1] + (world.random() - 0.5) * 2 * spread, dir[2] + (world.random() - 0.5) * 2 * spread];
     const n = Math.hypot(...direction) || 1;
     world.shots.push({
       id: world.nextId++, by: pilot, damage: active === "shotgun" ? 1 : active === "cannon" ? 4 : damage,
       pos: [...origin], dir: direction.map((v) => v / n),
       life: active === "shotgun" ? 0.42 : BULLET_LIFE,
-      speed: active === "laser" ? 240 : active === "cannon" ? 34 : BULLET_SPEED,
-      kind: active || "normal",
+      speed: active === "laser" ? 240 : active === "cannon" ? 34 : active ? BULLET_SPEED : BULLET_SPEED * loadout.speed,
+      kind: active || loadout.kind,
     });
   }
   if (active && active !== "sword") {
     pilot.special.ammo--;
     if (pilot.special.ammo <= 0) pilot.special = null;
   }
-  return active || "normal";
+  return active || loadout.kind;
 }
 
 /** Support pulse: repairs the caster and every active pilot in range. */
@@ -440,6 +466,7 @@ export function step(world, pilots, dt, now) {
     }
 
   const alive = pilots.filter(targetable);
+  if (stomp(world, pilots)) changed = true;
 
   // Planet hazards.
   for (const p of alive)
@@ -578,7 +605,7 @@ export function step(world, pilots, dt, now) {
       }
       if (t || d || rival) {
         if (!(t && !t.hp) && !(d && !d.hp)) event(world, "hit", s.pos);
-        if (s.kind === "cannon") {
+        if (s.kind === "cannon" || s.kind === "rocket") {
           s.exploded = true;
           blast(world, s.pos, credit ? s.by : null, pilots);
         }
@@ -586,7 +613,7 @@ export function step(world, pilots, dt, now) {
         changed = true;
       }
     }
-    if (s.kind === "cannon" && s.life <= 0 && !s.exploded) {
+    if ((s.kind === "cannon" || s.kind === "rocket") && s.life <= 0 && !s.exploded) {
       s.exploded = true;
       blast(world, s.pos, pilots.includes(s.by) ? s.by : null, pilots);
     }

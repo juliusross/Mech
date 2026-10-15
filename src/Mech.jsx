@@ -86,7 +86,7 @@ function useGait(root, { idle, down, flame, thrust }) {
 }
 
 /* ---------------- Assault: balanced humanoid ---------------- */
-function AssaultBody({ c, pitch, idle, down, thrust }) {
+function AssaultBody({ c, pitch, idle, down, thrust, children }) {
   const root = useRef(), body = useRef(), torso = useRef(), flame = useRef();
   const legs = [useRef(), useRef()], shins = [useRef(), useRef()];
   const gait = useGait(root, { idle, down, flame, thrust });
@@ -145,6 +145,7 @@ function AssaultBody({ c, pitch, idle, down, thrust }) {
           </group>
           <Part size={[1.3, 1.1, 0.55]} position={[0, 0.95, 0.85]} color={c.dark} />
           <Thrusters flame={flame} xs={[-0.38, 0.38]} y={0.15} z={1.05} />
+          {children}
         </group>
       </group>
     </group>
@@ -152,7 +153,7 @@ function AssaultBody({ c, pitch, idle, down, thrust }) {
 }
 
 /* ---------------- Scout: light, reverse-jointed runner ---------------- */
-function ScoutBody({ c, pitch, idle, down, thrust }) {
+function ScoutBody({ c, pitch, idle, down, thrust, children }) {
   const root = useRef(), body = useRef(), torso = useRef(), flame = useRef();
   const legs = [useRef(), useRef()], shins = [useRef(), useRef()], feet = [useRef(), useRef()];
   const gait = useGait(root, { idle, down, flame, thrust });
@@ -208,6 +209,7 @@ function ScoutBody({ c, pitch, idle, down, thrust }) {
           <Cyl args={[0.02, 0.02, 1.0, 6]} position={[-0.3, 1.5, 0.55]} rotation={[-0.4, 0, 0]} color="#9aa5b1" />
           <Cyl args={[0.02, 0.02, 0.8, 6]} position={[0.3, 1.45, 0.6]} rotation={[-0.5, 0, 0]} color="#9aa5b1" />
           <Thrusters flame={flame} xs={[0]} y={0.3} z={1.05} />
+          {children}
         </group>
       </group>
     </group>
@@ -215,7 +217,7 @@ function ScoutBody({ c, pitch, idle, down, thrust }) {
 }
 
 /* ---------------- Heavy: hulking siege frame ---------------- */
-function HeavyBody({ c, pitch, idle, down, thrust }) {
+function HeavyBody({ c, pitch, idle, down, thrust, children }) {
   const root = useRef(), body = useRef(), torso = useRef(), flame = useRef();
   const legs = [useRef(), useRef()], shins = [useRef(), useRef()];
   const gait = useGait(root, { idle, down, flame, thrust });
@@ -285,6 +287,7 @@ function HeavyBody({ c, pitch, idle, down, thrust }) {
             <Cyl key={x} args={[0.16, 0.18, 1.0, 10]} position={[x, 2.2, 0.75]} color="#2c3642" />
           ))}
           <Thrusters flame={flame} xs={[-0.6, 0.6]} y={0.2} z={0.95} />
+          {children}
         </group>
       </group>
     </group>
@@ -298,7 +301,7 @@ const QUAD = [
   [-1, 1],
   [1, 1],
 ];
-function SupportBody({ c, pitch, idle, down, thrust }) {
+function SupportBody({ c, pitch, idle, down, thrust, children }) {
   const root = useRef(), body = useRef(), torso = useRef(), flame = useRef(), dish = useRef();
   const uppers = QUAD.map(() => useRef());
   const gait = useGait(root, { idle, down, flame, thrust });
@@ -358,6 +361,7 @@ function SupportBody({ c, pitch, idle, down, thrust }) {
           {/* light cannon */}
           <Cyl args={[0.16, 0.2, 1.3, 12]} position={[0.55, 0.2, -1.4]} rotation={[Math.PI / 2, 0, 0]} color="#1a222c" />
           <Thrusters flame={flame} xs={[-0.4, 0.4]} y={0.2} z={1.2} />
+          {children}
         </group>
       </group>
     </group>
@@ -365,6 +369,164 @@ function SupportBody({ c, pitch, idle, down, thrust }) {
 }
 
 const BODIES = { assault: AssaultBody, scout: ScoutBody, heavy: HeavyBody, support: SupportBody };
+
+/* ---------- shoulder-mounted loadout weapons ---------- */
+function Minigun({ c }) {
+  const spin = useRef();
+  useFrame((_, dt) => {
+    if (spin.current) spin.current.rotation.z += dt * 9;
+  });
+  return (
+    <group>
+      <Part size={[0.55, 0.55, 0.8]} color={c.dark} />
+      <group ref={spin} position={[0, 0, -0.95]}>
+        {Array.from({ length: 6 }, (_, i) => {
+          const a = (i / 6) * Math.PI * 2;
+          return <Cyl key={i} args={[0.055, 0.055, 1.3, 6]} position={[Math.cos(a) * 0.16, Math.sin(a) * 0.16, 0]} rotation={[Math.PI / 2, 0, 0]} color="#2a2f35" />;
+        })}
+        <Cyl args={[0.24, 0.24, 0.12, 12]} position={[0, 0, -0.55]} rotation={[Math.PI / 2, 0, 0]} color="#3a4048" />
+      </group>
+      {/* ammo feed */}
+      <Part size={[0.18, 0.18, 0.7]} position={[0.32, -0.2, 0.35]} rotation={[0.5, 0, 0]} color="#8a6d2b" metal={0.8} />
+    </group>
+  );
+}
+function Railgun({ c }) {
+  return (
+    <group>
+      <Part size={[0.4, 0.45, 0.9]} color={c.dark} />
+      {[-0.11, 0.11].map((x) => (
+        <Part key={x} size={[0.08, 0.14, 2.4]} position={[x, 0, -1.5]} color="#9aa5b1" metal={0.95} rough={0.2} />
+      ))}
+      {[-0.7, -1.2, -1.7, -2.2].map((z) => (
+        <mesh key={z} position={[0, 0, z]} rotation={[0, 0, 0]}>
+          <torusGeometry args={[0.2, 0.04, 6, 16]} />
+          <meshStandardMaterial color={c.visor} emissive={c.visor} emissiveIntensity={c.glow * 1.2} />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+function RocketPod({ c }) {
+  return (
+    <group>
+      <Part size={[0.85, 0.65, 1.0]} color={c.primary} />
+      {[-0.22, 0, 0.22].map((x) =>
+        [-0.14, 0.14].map((y) => (
+          <Cyl key={`${x}${y}`} args={[0.085, 0.085, 0.06, 10]} position={[x, y, -0.51]} rotation={[Math.PI / 2, 0, 0]} color="#111418" />
+        )),
+      )}
+      {[-0.22, 0.22].map((x) => (
+        <mesh key={x} position={[x, 0.14, -0.53]}>
+          <coneGeometry args={[0.06, 0.12, 8]} />
+          <meshStandardMaterial color="#d8402a" />
+        </mesh>
+      ))}
+    </group>
+  );
+}
+const LOADOUT_MOUNT = {
+  assault: [-1.3, 1.78, 0.05],
+  scout: [-0.78, 0.95, 0.25],
+  heavy: [0, 2.45, 0.1],
+  support: [-0.62, 1.3, -0.3],
+};
+function Loadout({ type, cls, c }) {
+  if (!type || type === "plasma") return null;
+  return (
+    <group position={LOADOUT_MOUNT[cls] || LOADOUT_MOUNT.assault}>
+      {/* swivel mount */}
+      <Cyl args={[0.18, 0.24, 0.3, 10]} position={[0, -0.35, 0.1]} color={c.dark} />
+      {type === "minigun" && <Minigun c={c} />}
+      {type === "rail" && <Railgun c={c} />}
+      {type === "rockets" && <RocketPod c={c} />}
+    </group>
+  );
+}
+
+/* ---------- extra armour detail per class ---------- */
+function Light({ position, c }) {
+  return (
+    <mesh position={position}>
+      <boxGeometry args={[0.16, 0.1, 0.06]} />
+      <meshStandardMaterial color="#fff6d8" emissive="#ffe7a8" emissiveIntensity={c.glow * 1.4} />
+    </mesh>
+  );
+}
+function Details({ cls, c }) {
+  if (cls === "scout")
+    return (
+      <>
+        <Part size={[0.5, 0.3, 0.45]} position={[0, 0.05, -1.25]} color={c.dark} />
+        <Light position={[0, 0.05, -1.49]} c={c} />
+        {[-1, 1].map((s) => (
+          <group key={s}>
+            {[0, 1, 2].map((k) => (
+              <Part key={k} size={[0.05, 0.3, 0.06]} position={[s * 0.64, 0.6, 0.2 + k * 0.16]} color="#111" />
+            ))}
+            <Part size={[0.12, 0.12, 0.6]} position={[s * 0.45, 0.05, 0.85]} color={c.primary} />
+          </group>
+        ))}
+        <Part size={[0.9, 0.06, 0.06]} position={[0, 0.98, 1.0]} color={c.visor} emissive={c.visor} glow={c.glow} />
+      </>
+    );
+  if (cls === "heavy")
+    return (
+      <>
+        {[-0.9, -0.45, 0, 0.45, 0.9].map((x) => (
+          <mesh key={x} position={[x, 0.55, -1.17]}>
+            <sphereGeometry args={[0.06, 6, 6]} />
+            <meshStandardMaterial color="#9aa5b1" metalness={0.9} />
+          </mesh>
+        ))}
+        {[-1, 1].map((s) => (
+          <group key={s}>
+            <Light position={[s * 0.85, 1.85, -0.95]} c={c} />
+            <Light position={[s * 0.6, 1.85, -0.95]} c={c} />
+            <Part size={[0.15, 1.1, 0.9]} position={[s * 1.4, 1.0, 0.2]} color={c.dark} />
+            <Cyl args={[0.06, 0.06, 1.3, 6]} position={[s * 1.0, 0.4, 0.95]} rotation={[0.4, 0, 0]} color="#3a3f45" />
+          </group>
+        ))}
+        {[-0.5, 0.5].map((x) => (
+          <mesh key={x} position={[x, 2.72, 0.75]}>
+            <cylinderGeometry args={[0.13, 0.13, 0.06, 10]} />
+            <meshStandardMaterial color="#ff7a2a" emissive="#ff4a00" emissiveIntensity={c.glow * 0.8} />
+          </mesh>
+        ))}
+      </>
+    );
+  if (cls === "support")
+    return (
+      <>
+        {[-1, 1].map((s) => (
+          <group key={s}>
+            <Cyl args={[0.22, 0.22, 1.1, 12]} position={[s * 1.05, 0.65, 0.6]} rotation={[Math.PI / 2, 0, 0]} color="#d8dde2" metal={0.4} />
+            <Light position={[s * 0.6, 0.65, -1.3]} c={c} />
+          </group>
+        ))}
+        <Cyl args={[0.02, 0.02, 1.2, 6]} position={[0.55, 1.6, 0.6]} color="#9aa5b1" />
+        <Cyl args={[0.02, 0.02, 0.9, 6]} position={[-0.55, 1.5, 0.7]} color="#9aa5b1" />
+        <Part size={[0.7, 0.35, 0.5]} position={[0, 0.1, 1.3]} color={c.dark} />
+      </>
+    );
+  // assault
+  return (
+    <>
+      {[-1, 1].map((s) => (
+        <group key={s}>
+          <Light position={[s * 1.3, 1.58, -0.6]} c={c} />
+          {[0, 1, 2].map((k) => (
+            <Part key={k} size={[0.06, 0.06, 0.5]} position={[s * 0.5, 0.45 + k * 0.12, -0.82]} color="#111" />
+          ))}
+          <Part size={[0.45, 0.5, 0.18]} position={[s * 0.55, 0.95, 1.15]} color={c.primary} />
+        </group>
+      ))}
+      <Cyl args={[0.05, 0.05, 1.1, 6]} position={[0.42, 1.55, 0.2]} rotation={[0, 0, 0.25]} color="#3a3f45" />
+      <Cyl args={[0.05, 0.05, 1.1, 6]} position={[-0.42, 1.55, 0.2]} rotation={[0, 0, -0.25]} color="#3a3f45" />
+      <Part size={[0.35, 0.35, 0.35]} position={[1.55, 0.95, 0.35]} color={c.dark} />
+    </>
+  );
+}
 
 function SpecialWeapon({ type }) {
   if (!type) return null;
@@ -387,7 +549,7 @@ function SpecialWeapon({ type }) {
   </group>;
 }
 
-export function Mech({ paint = DEFAULT_PAINT, cls, down = false, fused = false, pitch = 0, thrust = false, idle = false, weapon = null }) {
+export function Mech({ paint = DEFAULT_PAINT, cls, down = false, fused = false, pitch = 0, thrust = false, idle = false, weapon = null, loadout = "plasma" }) {
   const spec = classOf(cls);
   const colors = useMemo(() => {
     const base = down ? { primary: "#3a3f47", secondary: "#2b3038", visor: "#40464f" } : paint;
@@ -396,7 +558,10 @@ export function Mech({ paint = DEFAULT_PAINT, cls, down = false, fused = false, 
   const Body = BODIES[cls] || AssaultBody;
   return (
     <group scale={spec.scale * (fused ? 1.8 : 1)} rotation={[down ? -0.5 : 0, 0, 0]}>
-      <Body c={colors} pitch={pitch} idle={idle} down={down} thrust={thrust} />
+      <Body c={colors} pitch={pitch} idle={idle} down={down} thrust={thrust}>
+        <Details cls={cls} c={colors} />
+        <Loadout type={loadout} cls={cls} c={colors} />
+      </Body>
       <SpecialWeapon type={weapon} />
     </group>
   );

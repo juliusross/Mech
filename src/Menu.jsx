@@ -1,6 +1,6 @@
 import React, { useRef } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
-import { CLASSES } from "../shared/arena.js";
+import { CLASSES, WEAPONS, WEAPON_IDS } from "../shared/arena.js";
 import { PLANETS, PLANET_IDS, planetOf } from "../shared/planets.js";
 import { PAINT_PRESETS } from "./settings.js";
 import { Mech } from "./Mech.jsx";
@@ -28,7 +28,7 @@ function LookAt({ y }) {
   return null;
 }
 
-export function MechPreview({ cls, paint, className = "preview", far = false }) {
+export function MechPreview({ cls, paint, loadout, className = "preview", far = false }) {
   return (
     <div className={className} aria-hidden="true">
       <Canvas
@@ -42,7 +42,7 @@ export function MechPreview({ cls, paint, className = "preview", far = false }) 
         <Turntable>
           {/* Normalise class size so every Titan fits the preview. */}
           <group position={[0, -0.2, 0]} scale={1 / CLASSES[cls].scale}>
-            <Mech cls={cls} paint={paint} idle />
+            <Mech cls={cls} paint={paint} loadout={loadout} idle />
           </group>
         </Turntable>
         <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.21, 0]} receiveShadow>
@@ -62,7 +62,7 @@ const go = (fn) => () => {
 export function MainMenu({ settings, onSolo, onFriends, onHangar, onSettings, inviteRoom }) {
   return (
     <div className="menu main-menu">
-      <MechPreview cls={settings.cls} paint={settings.paint} className="preview backdrop" far />
+      <MechPreview cls={settings.cls} paint={settings.paint} loadout={settings.weapon} className="preview backdrop" far />
       <div className="menu-panel title-panel">
         <h1>
           MECH<span>VERSE</span>
@@ -138,13 +138,41 @@ export function Hangar({ settings, update, onBack, onDeploy, deployLabel = "Choo
           </div>
         </section>
         <section className="hangar-preview" aria-label={`${spec.name} preview`}>
-          <MechPreview cls={settings.cls} paint={settings.paint} />
+          <MechPreview cls={settings.cls} paint={settings.paint} loadout={settings.weapon} />
           <p className="preview-caption">
             {spec.name} · {spec.armor} armor
             {spec.repair ? " · G repair" : ""}
           </p>
         </section>
         <section aria-labelledby="paint">
+          <h3 id="weapons">Weapon loadout</h3>
+          <div className="weapon-cards" role="group" aria-labelledby="weapons">
+            {WEAPON_IDS.map((id) => {
+              const w = WEAPONS[id];
+              const bars = [
+                ["Damage", w.damage / 3],
+                ["Fire rate", 0.4 / w.rate],
+                ["Velocity", w.speed / 2.4],
+              ];
+              return (
+                <button
+                  key={id}
+                  className="class-card weapon-card"
+                  aria-pressed={settings.weapon === id}
+                  onClick={go(() => update({ weapon: id }))}
+                >
+                  <strong>{w.name}</strong>
+                  <span>{w.blurb}</span>
+                  {bars.map(([label, f]) => (
+                    <span key={label} className="stat">
+                      <em>{label}</em>
+                      <i style={{ width: `${Math.round(Math.min(1, f) * 100)}%` }} />
+                    </span>
+                  ))}
+                </button>
+              );
+            })}
+          </div>
           <h3 id="paint">Customize paint</h3>
           <div className="swatches">
             {PAINT_PRESETS.map((p) => (

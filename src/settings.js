@@ -1,4 +1,4 @@
-import { CLASSES } from "../shared/arena.js";
+import { CLASSES, WEAPONS } from "../shared/arena.js";
 import { PLANETS, cleanPaint, DEFAULT_PAINT } from "../shared/planets.js";
 
 // Per-browser preferences. Storage may be unavailable (private mode), so every
@@ -7,6 +7,7 @@ const KEY = "mechverse-settings";
 export const DEFAULTS = {
   name: "",
   cls: "assault",
+  weapon: "plasma",
   paint: DEFAULT_PAINT,
   planet: "proving",
   volume: 0.7,
@@ -27,6 +28,7 @@ export function loadSettings() {
     ...s,
     name: typeof s.name === "string" ? s.name.slice(0, 20) : "",
     cls: CLASSES[s.cls] ? s.cls : "assault",
+    weapon: WEAPONS[s.weapon] ? s.weapon : "plasma",
     paint: cleanPaint(s.paint),
     planet: PLANETS[s.planet] ? s.planet : "proving",
     volume: Math.min(1, Math.max(0, Number(s.volume) || 0)),

@@ -66,6 +66,7 @@ export function useMultiplayer() {
           name,
           room: room.trim().toUpperCase(),
           cls: options.cls,
+          weapon: options.weapon,
           pvp: Boolean(options.pvp),
           planet: options.planet,
           paint: options.paint,
@@ -173,6 +174,7 @@ export function useMultiplayer() {
   const sendFuse = useCallback(() => send({ type: "fuse" }), [send]);
   const sendInteract = useCallback(() => send({ type: "interact" }), [send]);
   const sendPaint = useCallback((paint) => send({ type: "paint", paint }), [send]);
+  const sendWeapon = useCallback((weapon) => send({ type: "weapon", weapon }), [send]);
   const onEvents = useCallback((listener) => {
     eventListeners.current.add(listener);
     return () => eventListeners.current.delete(listener);
@@ -190,6 +192,7 @@ export function useMultiplayer() {
     sendFuse,
     sendInteract,
     sendPaint,
+    sendWeapon,
     onEvents,
     onShot,
     available: Boolean(endpoint),
