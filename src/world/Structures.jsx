@@ -1,6 +1,7 @@
 import React, { useMemo } from "react";
 import * as THREE from "three";
 import { Instanced } from "./Instanced.jsx";
+import { arenaStructures, LOW_COVER } from "../../shared/obstacles.js";
 
 /* ---------- shared textures ---------- */
 let windowTex = null;
@@ -499,9 +500,82 @@ export function Bridges({ bridges = [] }) {
   ));
 }
 // Low cover inside the arena (sandbags, crates, barriers). Visual only.
-const COVER = [
-  [-30, 20, 0], [30, 22, 0.4], [-48, -10, 1.2], [48, -14, -0.8], [-26, -55, 0.3], [28, -60, -0.2], [0, 35, 1.57], [-55, 40, 0.7], [55, 42, -0.6],
-];
+// Shared with the simulation so this cover also stops shots.
+const COVER = LOW_COVER;
+
+function Container({ w, d, h, color }) {
+  const ribs = [];
+  for (let z = -d / 2 + 0.4; z < d / 2; z += 0.55) ribs.push(z);
+  return (
+    <group>
+      <mesh position={[0, h / 2, 0]} castShadow receiveShadow>
+        <boxGeometry args={[w, h, d]} />
+        <meshStandardMaterial color={color} roughness={0.7} metalness={0.4} />
+      </mesh>
+      {ribs.map((z) => (
+        <mesh key={z} position={[0, h / 2, z]}>
+          <boxGeometry args={[w + 0.06, h - 0.2, 0.08]} />
+          <meshStandardMaterial color={color} roughness={0.6} metalness={0.45} />
+        </mesh>
+      ))}
+      {/* door end */}
+      <mesh position={[0, h / 2, d / 2 + 0.02]}>
+        <boxGeometry args={[w - 0.2, h - 0.3, 0.05]} />
+        <meshStandardMaterial color="#2b2f33" roughness={0.6} metalness={0.5} />
+      </mesh>
+    </group>
+  );
+}
+export function ArenaStructures({ planet }) {
+  const items = useMemo(() => arenaStructures(planet), [planet]);
+  return items.map((s, i) => (
+    <group key={i} position={[s.x, 0, s.z]} rotation={[0, s.r, 0]}>
+      {s.kind === "container" && s.h < 3 && <Container w={s.w} d={s.d} h={s.h} color={s.color} />}
+      {s.kind === "container" && s.h >= 3 && (
+        <>
+          <Container w={s.w} d={s.d} h={s.h / 2} color={s.color} />
+          <group position={[0, s.h / 2, 0.4]}>
+            <Container w={s.w} d={s.d} h={s.h / 2} color="#7a3a2a" />
+          </group>
+        </>
+      )}
+      {s.kind === "wall" && (
+        <>
+          <mesh position={[0, s.h / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[s.w, s.h, s.d]} />
+            <meshStandardMaterial color="#9a9890" roughness={0.95} />
+          </mesh>
+          <mesh position={[0, s.h + 0.1, 0]} castShadow>
+            <boxGeometry args={[s.w + 0.3, 0.2, s.d]} />
+            <meshStandardMaterial color="#7d7b74" roughness={0.95} />
+          </mesh>
+          <mesh position={[0, 0.25, 0]}>
+            <boxGeometry args={[s.w + 1, 0.5, s.d]} />
+            <meshStandardMaterial color="#86847d" roughness={1} />
+          </mesh>
+        </>
+      )}
+      {s.kind === "bunker" && (
+        <>
+          <mesh position={[0, s.h / 2, 0]} castShadow receiveShadow>
+            <boxGeometry args={[s.w, s.h, s.d]} />
+            <meshStandardMaterial color={s.color} roughness={0.95} />
+          </mesh>
+          <mesh position={[0, s.h + 0.2, 0]} castShadow>
+            <boxGeometry args={[s.w + 0.6, 0.4, s.d + 0.6]} />
+            <meshStandardMaterial color="#6d6b65" roughness={1} />
+          </mesh>
+          {[-1, 1].map((side) => (
+            <mesh key={side} position={[0, s.h * 0.62, (side * s.d) / 2]}>
+              <boxGeometry args={[s.w * 0.7, 0.35, 0.1]} />
+              <meshStandardMaterial color="#111" />
+            </mesh>
+          ))}
+        </>
+      )}
+    </group>
+  ));
+}
 export function Cover({ color }) {
   return COVER.map(([x, z, r], i) => (
     <group key={i} position={[x, 0, z]} rotation={[0, r, 0]}>

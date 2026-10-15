@@ -325,7 +325,7 @@ export function Settings({ settings, update, onBack }) {
   );
 }
 
-export function PauseMenu({ onResume, onHangar, onSettings, onQuit, connected }) {
+export function PauseMenu({ onResume, onFriends, onHangar, onSettings, onQuit, connected }) {
   return (
     <div className="menu pause" role="dialog" aria-modal="true" aria-label="Paused">
       <div className="menu-panel">
@@ -335,6 +335,7 @@ export function PauseMenu({ onResume, onHangar, onSettings, onQuit, connected })
           <button className="primary" onClick={go(onResume)}>
             Resume
           </button>
+          <button onClick={go(onFriends)}>{connected ? "Squad & invite link" : "Play with friends"}</button>
           <button onClick={go(onHangar)}>Hangar · mech &amp; paint</button>
           <button onClick={go(onSettings)}>Settings</button>
           <button onClick={go(onQuit)}>{connected ? "Leave room" : "Main menu"}</button>

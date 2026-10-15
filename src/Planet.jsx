@@ -19,6 +19,7 @@ import {
   Mountains,
   Bridges,
   Cover,
+  ArenaStructures,
 } from "./world/Structures.jsx";
 import { Ocean, Lake, River, LavaRivers } from "./world/Water.jsx";
 import { Weather } from "./world/Weather.jsx";
@@ -240,6 +241,7 @@ const World = memo(function World({ planet }) {
       {L.grass?.length > 0 && <Grass grass={vegetation.grass} />}
       <Rocks rocks={vegetation.rocks} color={P.rock} />
       {L.cover && <Cover color={P.rock} />}
+      <ArenaStructures planet={planet} />
       {(P.lava || []).map((z, i) => (
         <Lava key={i} zone={z} />
       ))}

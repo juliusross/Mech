@@ -31,6 +31,7 @@ import {
 } from "../shared/arena.js";
 import { planetOf, FUSE_SCALE } from "../shared/planets.js";
 import { terrainHeight, WORLD_EDGE } from "../shared/terrain.js";
+import { solidsFor, solidAt, pushOut } from "../shared/obstacles.js";
 import {
   createWorld,
   createPilot,
@@ -169,7 +170,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   const burst = useRef(0);
   const solo = useRef(null);
   if (!connected && !solo.current) {
-    solo.current = createWorld(Math.random, { planet: soloPlanet });
+    solo.current = createWorld(Math.random, { planet: soloPlanet, scatter: true });
     // Development builds expose the solo world for browser testing.
     if (import.meta.env.DEV) window.__mechverse = { world: solo.current, get me() { return me.current; } };
     // Testing aid: ?testwave=N starts solo play at wave N.
@@ -192,6 +193,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   const scene = connected
     ? {
         targets: network.targets,
+        targetPos: network.targetPos,
         enemies: network.enemies || [],
         bolts: network.bolts || [],
         drops: network.drops || [],
@@ -201,7 +203,12 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
         pvp: network.pvp,
       }
     : soloScene;
-  const shownTargets = INITIAL_TARGETS.map((t, i) => ({ ...t, hp: scene.targets[i] ?? 0 }));
+  // Targets move every wave; positions come from the simulation.
+  const shownTargets = INITIAL_TARGETS.map((t, i) => {
+    const at = scene.targetPos?.[i];
+    return { ...t, x: at ? at[0] : t.x, z: at ? at[1] : t.z, hp: scene.targets[i] ?? 0 };
+  });
+  const solids = solidsFor(planet);
   const live = useRef(null);
   live.current = { targets: shownTargets, enemies: scene.enemies };
   const wasDown = useRef(false);
@@ -353,6 +360,14 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       else velY.current -= P.gravity * dt;
       pos.current.x = THREE.MathUtils.clamp(pos.current.x, -WORLD_EDGE, WORLD_EDGE);
       pos.current.z = THREE.MathUtils.clamp(pos.current.z, -WORLD_EDGE, WORLD_EDGE);
+      // Buildings and cover are solid unless you fly over them.
+      const bodyRadius = onFoot ? 0.5 : 1.6 * spec.scale * (driver ? FUSE_SCALE : 1);
+      const [sx, sz] = pushOut(solids, pos.current.x, pos.current.z, bodyRadius, pos.current.y);
+      if (sx !== pos.current.x || sz !== pos.current.z) {
+        pos.current.x = sx;
+        pos.current.z = sz;
+        vel.current.multiplyScalar(0.6);
+      }
       const ground = terrainHeight(planet, pos.current.x, pos.current.z);
       if (k.has(" ") && pos.current.y <= ground + 0.05) velY.current = onFoot ? 5.5 : 9;
       pos.current.y = Math.max(ground, Math.min(ground + (onFoot ? 3.5 : 45), pos.current.y + velY.current * dt));
@@ -388,6 +403,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
         b.life -= dt;
         const p = b.pos.toArray();
         if (
+          solidAt(solids, p[0], p[1], p[2]) ||
           live.current.targets.some((t) => t.hp > 0 && hitsTarget(p, t)) ||
           live.current.enemies.some((e) => {
             const T = ENEMY_TYPES[e.t];
@@ -832,7 +848,9 @@ function App() {
               <button onClick={() => setPaused(true)}>Menu</button>
             </div>
           </div>
-          <RoomPanel network={network} settings={settings} startOpen={friendsOpen} />
+          {friendsOpen && (
+            <RoomPanel network={network} settings={settings} onClose={() => setFriendsOpen(false)} />
+          )}
           <div className="crosshair" aria-hidden="true">
             <span />
           </div>
@@ -875,8 +893,9 @@ function App() {
               ? `PRIVATE ROOM · ${network.pvp ? "VERSUS" : "SQUAD DEFENSE"} · ${P.name.toUpperCase()}`
               : `SOLO MISSION · ${P.name.toUpperCase()}`}
           </div>
-          {paused && screen === "play" && (
+          {paused && screen === "play" && !friendsOpen && (
             <PauseMenu
+              onFriends={() => setFriendsOpen(true)}
               connected={connected}
               onResume={() => {
                 setPaused(false);
