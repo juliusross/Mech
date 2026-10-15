@@ -230,3 +230,48 @@ test("pilots choose classes, versus is set at creation, and support can repair",
   assert.equal(snap.pvp, true);
   ws.close();
 });
+
+test("rooms carry a planet, pilots carry paint jobs, and two pilots can fuse", async (t) => {
+  const { server } = await setup(t);
+  const url = `ws://127.0.0.1:${server.http.address().port}/multiplayer`;
+  async function pilot(msg) {
+    const ws = new WebSocket(url, { origin });
+    const q = [];
+    ws.on("message", (raw) => q.push(JSON.parse(raw)));
+    await once(ws, "open");
+    ws.send(JSON.stringify(msg));
+    await new Promise((r) => setTimeout(r, 120));
+    return { ws, q, send: (d) => ws.send(JSON.stringify(d)) };
+  }
+  const a = await pilot({
+    type: "create",
+    name: "Driver",
+    planet: "ember",
+    paint: { primary: "#112233", visor: "javascript:alert(1)" },
+  });
+  const wa = a.q.find((m) => m.type === "welcome");
+  assert.equal(wa.planet, "ember");
+  const b = await pilot({ type: "join", name: "Gunner", room: wa.room });
+  const wb = b.q.find((m) => m.type === "welcome");
+  const room = server.rooms.get(wa.room);
+  const pa = room.players.get(wa.id);
+  assert.equal(pa.paint.primary, "#112233");
+  assert.equal(pa.paint.visor, "#00d9ff", "invalid colours fall back to defaults");
+  b.send({ type: "paint", paint: { primary: "#abcdef" } });
+  a.send({ type: "fuse" });
+  b.send({ type: "fuse" });
+  await new Promise((r) => setTimeout(r, 150));
+  assert.equal(room.players.get(wb.id).paint.primary, "#abcdef");
+  assert.ok(pa.fusion, "fused");
+  const snap = b.q.findLast((m) => m.type === "snapshot");
+  const me = snap.players.find((p) => p.id === wb.id);
+  assert.equal(me.fusion.role, "gunner");
+  assert.equal(me.fusion.partner, wa.id);
+  assert.equal(snap.planet, "ember");
+  // The gunner's own movement is ignored while fused.
+  b.send({ type: "move", position: [30, 0, 8], heading: 1 });
+  await new Promise((r) => setTimeout(r, 80));
+  assert.deepEqual(room.players.get(wb.id).position, pa.position);
+  a.ws.close();
+  b.ws.close();
+});

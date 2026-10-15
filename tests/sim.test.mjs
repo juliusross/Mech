@@ -158,3 +158,86 @@ test("destroying things emits explosion events", () => {
   const kinds = drainEvents(world).map((e) => e.kind);
   assert.ok(kinds.includes("boom"));
 });
+
+import { requestFuse, sizeOf } from "../shared/sim.js";
+import {
+  LAVA_DPS,
+  STRIKE_DAMAGE,
+  FUSE_DURATION,
+  FUSE_COOLDOWN,
+  FUSE_DAMAGE,
+  FUSE_SCALE,
+} from "../shared/planets.js";
+
+test("lava on Ember burns pilots standing in it, but not elsewhere or on other planets", () => {
+  for (const planet of ["ember", "proving"]) {
+    const world = createWorld(fixed, { planet });
+    world.drones = [];
+    const pilot = createPilot([-22, 0, -4]);
+    const safe = createPilot([0, 0, 8]);
+    run(world, [pilot, safe], 1);
+    if (planet === "ember") assert.ok(MAX_ARMOR - pilot.armor >= LAVA_DPS - 1);
+    else assert.equal(pilot.armor, MAX_ARMOR);
+    assert.equal(safe.armor, MAX_ARMOR);
+  }
+  assert.equal(createWorld(fixed, { planet: "nowhere" }).planet, "proving");
+});
+
+test("lightning on Tempest warns first, then strikes pilots inside the zone", () => {
+  const world = createWorld(fixed, { planet: "tempest" });
+  world.drones = [];
+  const pilot = createPilot([0, 0, 8]);
+  let now = run(world, [pilot], 3.1);
+  assert.ok(world.strikes.length, "a warning zone appeared");
+  const zone = world.strikes[0];
+  pilot.position = [zone.p[0], 0, zone.p[2]];
+  run(world, [pilot], 1.6, now);
+  assert.equal(pilot.armor, MAX_ARMOR - STRIKE_DAMAGE);
+});
+
+test("two nearby pilots who both request fusion become one big Titan, then split", () => {
+  const world = createWorld(fixed);
+  world.drones = [];
+  const a = createPilot([0, 0, 8]);
+  const b = createPilot([4, 0, 8], "heavy");
+  const far = createPilot([40, 0, 8]);
+  assert.ok(requestFuse(world, a, 100));
+  assert.ok(requestFuse(world, far, 150));
+  step(world, [a, b, far], 0.05, 200);
+  assert.equal(a.fusion, null, "needs a second nearby request");
+  requestFuse(world, b, 300);
+  step(world, [a, b, far], 0.05, 350);
+  assert.ok(a.fusion && a.fusion === b.fusion);
+  assert.equal(a.fusion.driver, a, "first to ask drives");
+  assert.equal(far.fusion, null);
+  assert.equal(a.fusion.armor, 100 + 160);
+  assert.equal(sizeOf(a), FUSE_SCALE);
+  a.position = [10, 0, 0];
+  step(world, [a, b, far], 0.05, 400);
+  assert.deepEqual(b.position, [10, 0, 0], "gunner rides with the driver");
+  fire(world, b, [10, 2.5, -1], [0, 0, -1]);
+  assert.equal(world.shots.at(-1).damage, CLASSES.heavy.damage * FUSE_DAMAGE);
+  a.fusion.armor = 130; // took half damage
+  step(world, [a, b, far], 0.05, 350 + FUSE_DURATION);
+  assert.equal(a.fusion, null);
+  assert.equal(a.armor, 50);
+  assert.equal(b.armor, 80);
+  assert.notDeepEqual(b.position, a.position, "gunner pops out beside the driver");
+  assert.equal(requestFuse(world, a, 400 + FUSE_DURATION), false, "cooldown");
+  assert.ok(a.fuseReadyAt >= 350 + FUSE_DURATION + FUSE_COOLDOWN);
+});
+
+test("a fused Titan destroyed by damage downs both pilots", () => {
+  const world = createWorld(fixed);
+  world.drones = [];
+  const a = createPilot([0, 0, 8]);
+  const b = createPilot([2, 0, 8]);
+  requestFuse(world, a, 0);
+  requestFuse(world, b, 10);
+  step(world, [a, b], 0.05, 20);
+  a.fusion.armor = BOLT_DAMAGE;
+  world.bolts.push({ id: 999, pos: [0, 2.5, 6], dir: [0, 0, 1], life: 1 });
+  step(world, [a, b], 0.1, 60);
+  assert.ok(a.downUntil && b.downUntil);
+  assert.equal(a.fusion, null);
+});

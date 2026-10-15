@@ -2,12 +2,14 @@ import { createServer } from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { MAX_AMMO, CLASSES, classOf } from "../shared/arena.js";
+import { PLANETS, cleanPaint } from "../shared/planets.js";
 import {
   createWorld,
   createPilot,
   setClass,
   fire,
   repair,
+  requestFuse,
   step,
   view,
   drainEvents,
@@ -69,6 +71,17 @@ export function createRoomServer({
       armor: p.armor,
       down: Boolean(p.downUntil),
       cls: p.cls,
+      paint: p.paint,
+      fusion: p.fusion
+        ? {
+            role: p.fusion.driver === p ? "driver" : "gunner",
+            partner: (p.fusion.driver === p ? p.fusion.gunner : p.fusion.driver).id,
+            armor: p.fusion.armor,
+            max: p.fusion.max,
+            left: Math.max(0, p.fusion.until - Date.now()),
+          }
+        : null,
+      fuseReady: Math.max(0, p.fuseReadyAt - Date.now()),
     })),
     ...view(room.world),
     events: drainEvents(room.world),
@@ -139,7 +152,10 @@ export function createRoomServer({
           room = {
             code,
             players: new Map(),
-            world: createWorld(Math.random, { pvp: data.pvp === true }),
+            world: createWorld(Math.random, {
+              pvp: data.pvp === true,
+              planet: PLANETS[data.planet] ? data.planet : "proving",
+            }),
             dirty: true,
           };
           rooms.set(code, room);
@@ -170,6 +186,7 @@ export function createRoomServer({
           updatedAt: now,
           ammo: MAX_AMMO,
           firedAt: 0,
+          paint: cleanPaint(data.paint),
         };
         room.players.set(player.id, player);
         clearTimeout(joinTimer);
@@ -180,11 +197,16 @@ export function createRoomServer({
           color: player.color,
           position: player.position,
           pvp: room.world.pvp,
+          planet: room.world.planet,
         });
         broadcast(room);
       } else if (player.downUntil) {
         // A downed Titan cannot move or fire until it reboots at its spawn.
         return;
+      } else if (data.type === "move" && player.fusion?.gunner === player) {
+        // The gunner rides inside the driver's Titan; only its aim matters.
+        if (Number.isFinite(data.heading)) player.heading = data.heading;
+        room.dirty = true;
       } else if (data.type === "move") {
         const p = data.position;
         if (
@@ -242,7 +264,13 @@ export function createRoomServer({
         const shot = { type: "shot", by: player.id, origin: o, dir };
         for (const p of room.players.values()) if (p !== player) send(p.ws, shot);
         room.dirty = true;
+      } else if (data.type === "paint") {
+        player.paint = cleanPaint(data.paint);
+        room.dirty = true;
+      } else if (data.type === "fuse") {
+        if (requestFuse(room.world, player, now)) room.dirty = true;
       } else if (data.type === "class") {
+        if (player.fusion) return;
         if (!CLASSES[data.cls]) return;
         setClass(player, data.cls);
         room.dirty = true;

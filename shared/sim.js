@@ -12,6 +12,21 @@ import {
   REPAIR_RANGE,
   REPAIR_COOLDOWN,
 } from "./arena.js";
+import {
+  PLANETS,
+  planetOf,
+  inLava,
+  LAVA_DPS,
+  STRIKE_WARNING,
+  STRIKE_RADIUS,
+  STRIKE_DAMAGE,
+  FUSE_RANGE,
+  FUSE_WINDOW,
+  FUSE_DURATION,
+  FUSE_COOLDOWN,
+  FUSE_SCALE,
+  FUSE_DAMAGE,
+} from "./planets.js";
 
 export const MAX_ARMOR = 100;
 export const BOLT_DAMAGE = 6;
@@ -30,9 +45,17 @@ const BOLT_LIFE = 4;
 const PILOT_RADIUS = 1.7;
 
 const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
-const chest = (p) => [p.position[0], p.position[1] + 2.5, p.position[2]];
+// Chest height of the Titan model, scaled with its size.
+const chest = (p) => [p.position[0], p.position[1] + 3 * sizeOf(p), p.position[2]];
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export const maxArmor = (p) => classOf(p.cls).armor;
+const isGunner = (p) => p.fusion?.gunner === p;
+/** Hit-box scale: class size, enlarged while driving a fused Titan. */
+export function sizeOf(p) {
+  return classOf(p.cls).scale * (p.fusion?.driver === p ? FUSE_SCALE : 1);
+}
+// A fused gunner rides inside the driver's Titan, so only the driver is hit.
+const targetable = (p) => !p.downUntil && !isGunner(p);
 
 export function createPilot(spawn, cls = "assault") {
   return {
@@ -44,6 +67,10 @@ export function createPilot(spawn, cls = "assault") {
     respawns: 0,
     score: 0,
     repairAt: 0,
+    fusion: null,
+    fuseAt: null,
+    fuseReadyAt: 0,
+    burn: 0,
   };
 }
 
@@ -55,10 +82,17 @@ export function setClass(pilot, cls) {
   pilot.armor = Math.round(ratio * maxArmor(pilot));
 }
 
-export function createWorld(random = Math.random, { pvp = false } = {}) {
+export function createWorld(
+  random = Math.random,
+  { pvp = false, planet = "proving" } = {},
+) {
   const world = {
     random,
     pvp,
+    planet: PLANETS[planet] ? planet : "proving",
+    strikes: [],
+    nextStrikeAt: 0,
+    fusions: [],
     nextId: 1,
     wave: 1,
     waveAt: 0,
@@ -101,7 +135,7 @@ export function fire(world, pilot, origin, dir) {
   world.shots.push({
     id: world.nextId++,
     by: pilot,
-    damage: classOf(pilot.cls).damage,
+    damage: classOf(pilot.cls).damage * (isGunner(pilot) ? FUSE_DAMAGE : 1),
     pos: [...origin],
     dir: [...dir],
     life: BULLET_LIFE,
@@ -120,7 +154,52 @@ export function repair(world, pilot, pilots, now) {
   return true;
 }
 
+/** Asks to fuse; two requests from nearby pilots within a few seconds pair up. */
+export function requestFuse(world, pilot, now) {
+  if (pilot.fusion || pilot.downUntil || now < pilot.fuseReadyAt) return false;
+  pilot.fuseAt = now;
+  return true;
+}
+
+function startFusion(world, driver, gunner, now) {
+  const f = {
+    id: world.nextId++,
+    driver,
+    gunner,
+    until: now + FUSE_DURATION,
+    armor: driver.armor + gunner.armor,
+    max: maxArmor(driver) + maxArmor(gunner),
+  };
+  driver.fusion = gunner.fusion = f;
+  driver.fuseAt = gunner.fuseAt = null;
+  gunner.position = [...driver.position];
+  world.fusions.push(f);
+  event(world, "fuse", chest(driver));
+}
+
+function endFusion(world, f, now, destroyed) {
+  world.fusions = world.fusions.filter((x) => x !== f);
+  for (const p of [f.driver, f.gunner]) {
+    p.fusion = null;
+    p.fuseReadyAt = now + FUSE_COOLDOWN;
+    if (destroyed) {
+      p.armor = 0;
+      p.downUntil = now + RESPAWN_MS;
+    } else p.armor = Math.max(1, Math.round((f.armor * maxArmor(p)) / f.max));
+  }
+  const d = f.driver.position;
+  f.gunner.position = [Math.max(-65, Math.min(65, d[0] + 3.5)), d[1], d[2]];
+  event(world, destroyed ? "down" : "unfuse", chest(f.driver));
+}
+
 function damagePilot(world, p, amount, now) {
+  if (p.fusion) {
+    const f = p.fusion;
+    f.armor = Math.max(0, f.armor - amount);
+    if (f.armor) return false;
+    endFusion(world, f, now, true);
+    return true;
+  }
   p.armor = Math.max(0, p.armor - amount);
   if (p.armor) return false;
   p.downUntil = now + RESPAWN_MS;
@@ -144,7 +223,69 @@ export function step(world, pilots, dt, now) {
       p.respawns++;
       changed = true;
     }
-  const alive = pilots.filter((p) => !p.downUntil);
+
+  // Fusion: end expired or abandoned pairs, keep gunners inside, pair requests.
+  for (const f of [...world.fusions])
+    if (now >= f.until || !pilots.includes(f.driver) || !pilots.includes(f.gunner))
+      endFusion(world, f, now, false);
+    else f.gunner.position = [...f.driver.position];
+  const ready = pilots.filter(
+    (p) =>
+      !p.downUntil && !p.fusion && p.fuseAt !== null && now - p.fuseAt <= FUSE_WINDOW,
+  );
+  for (let i = 0; i < ready.length; i++)
+    for (let j = i + 1; j < ready.length; j++) {
+      const [a, b] = [ready[i], ready[j]];
+      if (a.fusion || b.fusion) continue;
+      if (dist(a.position, b.position) > FUSE_RANGE) continue;
+      // Whoever asked first drives; the other becomes the gunner.
+      if (a.fuseAt <= b.fuseAt) startFusion(world, a, b, now);
+      else startFusion(world, b, a, now);
+      changed = true;
+    }
+
+  const alive = pilots.filter(targetable);
+
+  // Planet hazards.
+  for (const p of alive)
+    if (inLava(world.planet, p.position)) {
+      p.burn += LAVA_DPS * dt;
+      const dmg = Math.floor(p.burn);
+      if (dmg) {
+        p.burn -= dmg;
+        damagePilot(world, p, dmg, now);
+        changed = true;
+      }
+    } else p.burn = 0;
+  if (planetOf(world.planet).lightning) {
+    if (!world.nextStrikeAt) world.nextStrikeAt = now + 3000;
+    if (now >= world.nextStrikeAt) {
+      const near = alive[Math.floor(world.random() * alive.length)];
+      const base = near ? near.position : [0, 0, -20];
+      world.strikes.push({
+        id: world.nextId++,
+        p: [
+          clamp(base[0] + (world.random() - 0.5) * 16, -60, 60),
+          0,
+          clamp(base[2] + (world.random() - 0.5) * 16, -80, 60),
+        ],
+        at: now + STRIKE_WARNING * 1000,
+      });
+      world.nextStrikeAt = now + 2500 + world.random() * 2500;
+      changed = true;
+    }
+    world.strikes = world.strikes.filter((st) => {
+      if (now < st.at) return true;
+      for (const p of alive)
+        if (!p.downUntil && Math.hypot(p.position[0] - st.p[0], p.position[2] - st.p[2]) < STRIKE_RADIUS)
+          damagePilot(world, p, STRIKE_DAMAGE, now);
+      for (const d of world.drones)
+        if (d.hp > 0 && Math.hypot(d.pos[0] - st.p[0], d.pos[2] - st.p[2]) < STRIKE_RADIUS) d.hp = Math.max(0, d.hp - 2);
+      event(world, "strike", st.p);
+      changed = true;
+      return false;
+    });
+  }
 
   for (const d of world.drones) {
     if (d.hp <= 0) continue;
@@ -190,7 +331,7 @@ export function step(world, pilots, dt, now) {
       for (let a = 0; a < 3; a++) b.pos[a] += b.dir[a] * BOLT_SPEED * h;
       b.life -= h;
       const hit = alive.find(
-        (p) => !p.downUntil && dist(b.pos, chest(p)) < PILOT_RADIUS * classOf(p.cls).scale,
+        (p) => targetable(p) && dist(b.pos, chest(p)) < PILOT_RADIUS * sizeOf(p),
       );
       if (hit) {
         damagePilot(world, hit, BOLT_DAMAGE, now);
@@ -218,8 +359,9 @@ export function step(world, pilots, dt, now) {
         alive.find(
           (p) =>
             p !== s.by &&
-            !p.downUntil &&
-            dist(s.pos, chest(p)) < PILOT_RADIUS * classOf(p.cls).scale,
+            !(s.by.fusion && p.fusion === s.by.fusion) &&
+            targetable(p) &&
+            dist(s.pos, chest(p)) < PILOT_RADIUS * sizeOf(p),
         );
       if (t) {
         t.hp = Math.max(0, t.hp - s.damage);
@@ -269,5 +411,7 @@ export function view(world) {
     wave: world.wave,
     cleared: Boolean(world.waveAt),
     pvp: world.pvp,
+    planet: world.planet,
+    strikes: world.strikes.map((st) => ({ id: st.id, p: st.p })),
   };
 }

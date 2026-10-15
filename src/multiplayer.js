@@ -67,6 +67,8 @@ export function useMultiplayer() {
           room: room.trim().toUpperCase(),
           cls: options.cls,
           pvp: Boolean(options.pvp),
+          planet: options.planet,
+          paint: options.paint,
         }),
       );
     ws.onmessage = (event) => {
@@ -91,6 +93,8 @@ export function useMultiplayer() {
           wave: 1,
           cleared: false,
           pvp: Boolean(message.pvp),
+          planet: message.planet || "proving",
+          strikes: [],
           error: "",
         });
       } else if (message.type === "snapshot") {
@@ -102,6 +106,7 @@ export function useMultiplayer() {
           targets: message.targets,
           drones: message.drones,
           bolts: message.bolts,
+          strikes: message.strikes || [],
           wave: message.wave,
           cleared: message.cleared,
         }));
@@ -164,6 +169,8 @@ export function useMultiplayer() {
   }, []);
   const sendClass = useCallback((cls) => send({ type: "class", cls }), [send]);
   const sendRepair = useCallback(() => send({ type: "repair" }), [send]);
+  const sendFuse = useCallback(() => send({ type: "fuse" }), [send]);
+  const sendPaint = useCallback((paint) => send({ type: "paint", paint }), [send]);
   const onEvents = useCallback((listener) => {
     eventListeners.current.add(listener);
     return () => eventListeners.current.delete(listener);
@@ -178,6 +185,8 @@ export function useMultiplayer() {
     sendReload,
     sendClass,
     sendRepair,
+    sendFuse,
+    sendPaint,
     onEvents,
     onShot,
     available: Boolean(endpoint),
