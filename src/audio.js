@@ -154,3 +154,13 @@ sfx.ouch = (level = 1) => {
   burst({ dur: 0.08, peak: 0.12, filter: "bandpass", from: 1200, to: 600, level });
   if (Math.random() < 0.7) say(level);
 };
+
+sfx.eject = (level = 1) => {
+  burst({ dur: 0.35, peak: 0.35, filter: "highpass", from: 3000, to: 900, level });
+  tone({ type: "square", from: 600, to: 1200, dur: 0.25, peak: 0.08, level });
+};
+sfx.mechdrop = (level = 1) => {
+  tone({ type: "sawtooth", from: 90, to: 40, dur: 1.4, peak: 0.25, level });
+  burst({ dur: 1.2, peak: 0.4, from: 2000, to: 60, delay: 0.25, level });
+  [523, 784, 1046].forEach((f, i) => tone({ type: "triangle", from: f, to: f, dur: 0.2, peak: 0.1, delay: 0.5 + i * 0.1, level }));
+};

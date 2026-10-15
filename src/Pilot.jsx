@@ -58,6 +58,23 @@ export function Pilot({ paint, moving = false }) {
           </group>
         </group>
       ))}
+      {/* compact minigun held at the hip */}
+      <group position={[0.35, 1.2, -0.35]}>
+        <mesh castShadow>
+          <boxGeometry args={[0.16, 0.18, 0.42]} />
+          <meshStandardMaterial color="#2a2f35" metalness={0.8} roughness={0.35} />
+        </mesh>
+        {[0, 1, 2, 3].map((i) => (
+          <mesh key={i} position={[Math.cos((i * Math.PI) / 2) * 0.045, Math.sin((i * Math.PI) / 2) * 0.045, -0.42]} rotation={[Math.PI / 2, 0, 0]}>
+            <cylinderGeometry args={[0.018, 0.018, 0.45, 6]} />
+            <meshStandardMaterial color="#1a1c1f" metalness={0.9} roughness={0.3} />
+          </mesh>
+        ))}
+        <mesh position={[0, -0.12, 0.08]}>
+          <boxGeometry args={[0.1, 0.12, 0.16]} />
+          <meshStandardMaterial color="#8a6d2b" metalness={0.7} />
+        </mesh>
+      </group>
       <mesh position={[0, 1.14, 0.46]}>
         <sphereGeometry args={[0.07, 8, 6]} />
         <meshStandardMaterial color={visor} emissive={visor} emissiveIntensity={1.4} />

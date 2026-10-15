@@ -49,8 +49,35 @@ function houses(rand, rect, n, avoid, roof) {
     roof: roof || ["#8a3b2b", "#5d4037", "#46525e", "#7a4a2a"][Math.floor(rand() * 4)],
   }));
 }
-const grass = (rand, n, colors) =>
-  scatter(rand, n, [-90, -110, 90, 90], [], (x, z) => ({ x, z, s: 0.5 + rand() * 0.8, r: rand() * 6.28, c: colors[Math.floor(rand() * colors.length)] }));
+const grass = (rand, n, colors, area = [-150, -175, 150, 140]) =>
+  scatter(rand, n, area, [], (x, z) => ({ x, z, s: 0.5 + rand() * 0.8, r: rand() * 6.28, c: colors[Math.floor(rand() * colors.length)] }));
+// Wildflowers in small clumps.
+const flowers = (rand, n, colors, area = [-140, -165, 140, 130]) => {
+  const out = [];
+  while (out.length < n) {
+    const cx = area[0] + rand() * (area[2] - area[0]),
+      cz = area[1] + rand() * (area[3] - area[1]);
+    const c = colors[Math.floor(rand() * colors.length)];
+    for (let i = 0; i < 6 && out.length < n; i++)
+      out.push({ x: cx + (rand() - 0.5) * 3, z: cz + (rand() - 0.5) * 3, s: 0.6 + rand() * 0.6, r: rand() * 6.28, c });
+  }
+  return out;
+};
+// Reeds along a river polyline.
+const reeds = (rand, points, width, n) => {
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const k = rand() * (points.length - 1);
+    const a = points[Math.floor(k)],
+      b = points[Math.min(points.length - 1, Math.floor(k) + 1)];
+    const f = k % 1;
+    const x = a[0] + (b[0] - a[0]) * f,
+      z = a[1] + (b[1] - a[1]) * f;
+    const side = rand() < 0.5 ? -1 : 1;
+    out.push({ x: x + (rand() - 0.5) * 4, z: z + side * (width / 2 + 1 + rand() * 3), s: 0.7 + rand() * 0.7, r: rand() * 6.28, c: rand() < 0.5 ? "#6f8a3a" : "#87a24a" });
+  }
+  return out;
+};
 
 const LAYOUTS = {
   // Sunny coastal base: town, highway, beach and ocean, construction site, forest.
@@ -76,7 +103,9 @@ const LAYOUTS = {
       palms: scatter(rand, 70, [96, -280, 122, 280], [], tree(rand, "palm", 0.9, 1.3)),
       rocks: scatter(rand, 30, [-100, -100, 95, 90], [avoidPlay], (x, z) => ({ x, z, s: 0.5 + rand() * 1.5, r: rand() * 6 })),
       cover: true,
-      grass: grass(rand, 900, ["#4f7a35", "#5f8a3d", "#6b9442"]),
+      grass: grass(rand, 3200, ["#4f7a35", "#5f8a3d", "#6b9442", "#7a9c48"]),
+      flowers: flowers(rand, 420, ["#f4e04d", "#ffffff", "#e85a8a", "#9b7cf0", "#ff9a3c"]),
+      bushes: scatter(rand, 140, [-150, -170, 150, 140], [avoidPlay], (x, z) => ({ x, z, s: 0.5 + rand() * 0.9, r: rand() * 6 })),
       ground: "#5d7a3e",
       groundAlt: "#4b6a33",
     };
@@ -178,7 +207,8 @@ const LAYOUTS = {
       trees: scatter(rand, 50, [-70, 70, 70, 80], [], tree(rand, "oak", 0.6, 0.9)),
       rocks: [],
       cover: true,
-      grass: grass(rand, 300, ["#34503a", "#3d5a40"]),
+      grass: grass(rand, 900, ["#34503a", "#3d5a40"]),
+      reeds: reeds(rand, river, 22, 260),
       ground: "#26303a",
       groundAlt: "#1f2830",
     };
@@ -208,7 +238,10 @@ const LAYOUTS = {
       bushes: scatter(rand, 260, [-120, -130, 120, 110], [], (x, z) => ({ x, z, s: 0.6 + rand() * 1.1, r: rand() * 6 })),
       rocks: scatter(rand, 25, [-100, -100, 95, 90], [avoidPlay], (x, z) => ({ x, z, s: 0.5 + rand() * 1.4, r: rand() * 6 })),
       cover: true,
-      grass: grass(rand, 1100, ["#2f6b3a", "#3b7d42", "#4a8a3f"]),
+      grass: grass(rand, 3400, ["#2f6b3a", "#3b7d42", "#4a8a3f", "#5a9a44"]),
+      flowers: flowers(rand, 300, ["#ff5aa8", "#ffd23c", "#ff7a3c", "#ffffff"]),
+      ferns: scatter(rand, 520, [-160, -180, 160, 160], [], (x, z) => ({ x, z, s: 0.7 + rand() * 0.9, r: rand() * 6.28 })),
+      reeds: reeds(rand, river, 20, 320),
       ground: "#2c4a26",
       groundAlt: "#243f20",
     };

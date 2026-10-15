@@ -3,7 +3,8 @@ import { useFrame } from "@react-three/fiber";
 import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import { mergeGeometries } from "three/addons/utils/BufferGeometryUtils.js";
-import { Drone } from "./Combat.jsx";
+import { Drone, Laser } from "./Combat.jsx";
+import { ENEMY_LASER } from "../shared/arena.js";
 import { Mech } from "./Mech.jsx";
 import { RoundedGeometry } from "./RoundedPart.jsx";
 import { ENEMY_TYPES } from "../shared/enemies.js";
@@ -247,11 +248,9 @@ export function EnemyBolt({ bolt }) {
   const g = useRef();
   const first = useRef(bolt.p);
   useFrame((_, dt) => g.current?.position.lerp(new THREE.Vector3(...bolt.p), 1 - Math.exp(-30 * dt)));
-  const look = BOLT_LOOK[bolt.k] || BOLT_LOOK.plasma;
   return (
-    <mesh ref={g} position={first.current}>
-      <sphereGeometry args={[look.r, 8, 8]} />
-      <meshBasicMaterial color={look.color} />
-    </mesh>
+    <group ref={g} position={first.current}>
+      <Laser pos={[0, 0, 0]} dir={bolt.d} kind={bolt.k} color={ENEMY_LASER[bolt.k] || ENEMY_LASER.plasma} />
+    </group>
   );
 }

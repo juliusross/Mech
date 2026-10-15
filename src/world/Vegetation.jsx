@@ -138,3 +138,54 @@ export function Rocks({ rocks, color }) {
     </Instanced>
   );
 }
+
+// Wildflowers: a thin stem and a bright blossom.
+const FL = {
+  stem: (f) => ({ p: [f.x, 0.25 * f.s, f.z], s: [0.03 * f.s, 0.5 * f.s, 0.03 * f.s] }),
+  bloom: (f) => ({ p: [f.x, 0.52 * f.s, f.z], s: [0.13 * f.s, 0.08 * f.s, 0.13 * f.s], r: [0, f.r, 0], c: f.c }),
+};
+export function Flowers({ flowers }) {
+  return (
+    <>
+      <Instanced items={flowers} place={FL.stem} castShadow={false}>
+        <cylinderGeometry args={[1, 1, 1, 4]} />
+        <meshStandardMaterial color="#4f7a35" roughness={1} />
+      </Instanced>
+      <Instanced items={flowers} place={FL.bloom} castShadow={false}>
+        <icosahedronGeometry args={[1, 0]} />
+        <meshStandardMaterial color="#ffffff" roughness={0.6} emissive="#222222" />
+      </Instanced>
+    </>
+  );
+}
+
+// Ferns: five fronds fanned from the centre.
+const FROND_ANGLES = [0, 1.26, 2.51, 3.77, 5.03];
+export function Ferns({ ferns }) {
+  const fronds = useMemo(() => ferns.flatMap((f) => FROND_ANGLES.map((a) => ({ ...f, a }))), [ferns]);
+  const place = useMemo(
+    () => (f) => ({
+      p: [f.x + Math.sin(f.a + f.r) * 0.55 * f.s, 0.35 * f.s, f.z + Math.cos(f.a + f.r) * 0.55 * f.s],
+      s: [0.35 * f.s, 0.04 * f.s, 1.3 * f.s],
+      r: [-0.5, f.a + f.r, 0],
+    }),
+    [],
+  );
+  return (
+    <Instanced items={fronds} place={place} castShadow={false}>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial color="#2f7a3a" roughness={0.8} />
+    </Instanced>
+  );
+}
+
+// Reeds: tall thin blades along riverbanks.
+const REED = (r) => ({ p: [r.x, 0.7 * r.s, r.z], s: [0.05 * r.s, 1.4 * r.s, 0.05 * r.s], r: [0.08, r.r, 0.05], c: r.c });
+export function Reeds({ reeds }) {
+  return (
+    <Instanced items={reeds} place={REED} castShadow={false}>
+      <coneGeometry args={[1, 1, 3]} />
+      <meshStandardMaterial color="#ffffff" roughness={1} />
+    </Instanced>
+  );
+}

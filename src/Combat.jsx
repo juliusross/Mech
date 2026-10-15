@@ -120,6 +120,8 @@ export const EFFECT_LIFE = {
   repair: 0.8,
   down: 1.8,
   fuse: 1.0,
+  eject: 0.8,
+  mechdrop: 1.6,
   unfuse: 0.7,
   strike: 0.6,
   beam: 0.16,
@@ -164,6 +166,8 @@ export function Effect({ effect, onDone }) {
     repair: "#5dff9a",
     down: "#ff4a6a",
     fuse: "#c48bff",
+    eject: "#ffd27a",
+    mechdrop: "#9fe8ff",
     unfuse: "#c48bff",
     strike: "#dfe9ff",
     beam: "#9bf9ff",
@@ -260,6 +264,75 @@ export function BloodSplat({ effect, onDone }) {
           </mesh>
         ))}
       </group>
+    </group>
+  );
+}
+
+// Laser bolt: a white-hot core inside a coloured glow, pointed along its
+// direction of travel. Colours exceed 1 so the bloom pass makes them shine.
+const Y = new THREE.Vector3(0, 1, 0);
+const LASER_SIZE = {
+  normal: [2.6, 0.06, 0.2],
+  minigun: [1.6, 0.04, 0.13],
+  rail: [6, 0.07, 0.24],
+  rocket: [1.4, 0.16, 0.42],
+  cannon: [2, 0.22, 0.55],
+  shotgun: [1, 0.04, 0.12],
+  pilot: [1.1, 0.03, 0.1],
+  plasma: [2.2, 0.07, 0.24],
+  bullet: [1.3, 0.035, 0.11],
+  shell: [1.8, 0.16, 0.42],
+};
+export function Laser({ pos, dir, color, kind = "normal" }) {
+  const g = useRef();
+  const [len, core, glow] = LASER_SIZE[kind] || LASER_SIZE.normal;
+  const c = React.useMemo(() => new THREE.Color(color).multiplyScalar(4), [color]);
+  React.useLayoutEffect(() => {
+    if (!g.current || !dir) return;
+    g.current.quaternion.setFromUnitVectors(Y, new THREE.Vector3(...dir).normalize());
+  });
+  return (
+    <group ref={g} position={pos}>
+      <mesh position={[0, -len / 2, 0]}>
+        <cylinderGeometry args={[core, core, len, 6]} />
+        <meshBasicMaterial color={[3, 3, 3]} toneMapped={false} />
+      </mesh>
+      <mesh position={[0, -len / 2, 0]}>
+        <cylinderGeometry args={[glow, glow * 0.6, len * 1.05, 8]} />
+        <meshBasicMaterial color={c} toneMapped={false} transparent opacity={0.55} depthWrite={false} blending={THREE.AdditiveBlending} />
+      </mesh>
+    </group>
+  );
+}
+
+// A replacement Titan arrives: a bright column from the sky and a shock ring.
+export function DropBeam({ effect, onDone }) {
+  const beam = useRef(),
+    ring = useRef(),
+    age = useRef(0);
+  useFrame((_, dt) => {
+    age.current += dt;
+    const t = Math.min(1, age.current / 1.6);
+    if (beam.current) {
+      beam.current.scale.set(1 - t * 0.7, 1, 1 - t * 0.7);
+      beam.current.material.opacity = (1 - t) * 0.8;
+    }
+    if (ring.current) {
+      ring.current.scale.setScalar(1 + t * 10);
+      ring.current.material.opacity = (1 - t) * 0.9;
+    }
+    if (t >= 1) onDone(effect.id);
+  });
+  return (
+    <group position={effect.p}>
+      <mesh ref={beam} position={[0, 40, 0]}>
+        <cylinderGeometry args={[1.6, 1.6, 80, 16, 1, true]} />
+        <meshBasicMaterial color={[1.2, 3, 4]} toneMapped={false} transparent depthWrite={false} blending={THREE.AdditiveBlending} side={THREE.DoubleSide} />
+      </mesh>
+      <mesh ref={ring} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.2, 0]}>
+        <ringGeometry args={[0.8, 1.1, 40]} />
+        <meshBasicMaterial color={[1.5, 3, 4]} toneMapped={false} transparent depthWrite={false} blending={THREE.AdditiveBlending} />
+      </mesh>
     </group>
   );
 }
