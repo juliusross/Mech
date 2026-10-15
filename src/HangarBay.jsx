@@ -223,15 +223,16 @@ function Bay({ cls, paint, loadout }) {
           </mesh>
         </group>
       ))}
-      <group position={[-16, 0, -6]} rotation={[0, 0.4, 0]}>
+      <group position={[-16, 0, -6]} rotation={[0, Math.PI + 0.4, 0]}>
         <Mech cls="heavy" paint={{ primary: "#3a3d42", secondary: "#24262a", visor: "#555555" }} idle />
       </group>
-      <group position={[16, 0, -6]} rotation={[0, -0.4, 0]}>
+      <group position={[16, 0, -6]} rotation={[0, Math.PI - 0.4, 0]}>
         <Mech cls="scout" paint={{ primary: "#3a3d42", secondary: "#24262a", visor: "#555555" }} idle />
       </group>
 
       {/* the player's Titan */}
-      <group scale={1 / scale}>
+      {/* Titans face -z in battle; turn this one toward the bay camera. */}
+      <group scale={1 / scale} rotation={[0, Math.PI - 0.25, 0]}>
         <Mech cls={cls} paint={paint} loadout={loadout} idle />
       </group>
 
