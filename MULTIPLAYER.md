@@ -95,11 +95,11 @@ Four simultaneous browser sessions, different physical computers, high-latency c
 
 ## Online hosting
 
-Room server: https://mechverse-rooms.onrender.com (Render free plan). The repository's Render blueprint now selects `main`, which contains the merged co-op and versus features. The existing Render service must also be switched to `main` and deployed in its dashboard; changing this file alone does not update a running service. Free instances sleep after ~15 idle minutes, so the first connection may take up to a minute. Deployed web builds connect to this server by default; `VITE_MULTIPLAYER_URL` overrides that. To allow another site, add its exact origin to `ALLOWED_ORIGINS` in Render.
+Room server: https://mechverse-rooms.onrender.com (Render free plan). The repository's Render blueprint now selects `main`, which contains the merged co-op and versus features. Verify that the existing Render service also selects `main` and has deployed the latest commit; changing this file alone does not update a running service. Free instances sleep after ~15 idle minutes, so the first connection may take up to a minute. Deployed web builds connect to this server by default; `VITE_MULTIPLAYER_URL` overrides that. To allow another site, add its exact origin to `ALLOWED_ORIGINS` in Render.
 
-### Original preparation notes
+### Service settings
 
-This feature needs a persistent Node WebSocket server in addition to the Vercel frontend. Render web services support WebSockets: https://render.com/docs/websocket . No new hosting account, paid service, or online multiplayer deployment has been created.
+This feature uses a persistent Node WebSocket server alongside the Vercel frontend. Render web services support WebSockets: https://render.com/docs/websocket .
 
 Server settings:
 
@@ -113,8 +113,7 @@ Server settings:
 
 Frontend build setting:
 
-- Set `VITE_MULTIPLAYER_URL=wss://YOUR-SERVER-HOST/multiplayer` before building on Vercel.
-- Use a separate preview first, then test two computers before updating production.
+- The frontend uses the Render endpoint by default. Set `VITE_MULTIPLAYER_URL=wss://YOUR-SERVER-HOST/multiplayer` only when using another server.
 - No server credential is required in the frontend. The room code is the invitation secret; anyone with it can join until the room is full.
 
 Movement is client-predicted and relayed with sanity bounds. Shots, damage, ammo, and score are server-owned. This is still not a robust anti-cheat system.
