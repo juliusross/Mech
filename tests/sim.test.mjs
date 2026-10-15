@@ -34,6 +34,95 @@ test("enemies hunt the nearest pilot and their fire wears down armor", () => {
   }
 });
 
+test("large enemy defeats create a shared drop that only one pilot collects", () => {
+  const world = createWorld(() => 0.5);
+  const a = createPilot([0, 0, 8]);
+  const b = createPilot([0, 0, 8]);
+  const enemy = world.enemies[0];
+  enemy.type = "tank";
+  enemy.hp = 1;
+  enemy.pos = [0, 0, -4];
+  world.enemies = [enemy];
+  fire(world, a, [0, 1.4, 4], [0, 0, -1]);
+  for (let now = 50; now <= 300; now += 50) step(world, [a, b], 0.05, now);
+  assert.equal(enemy.hp, 0);
+  assert.equal(world.drops.length, 1);
+  a.position = [...world.drops[0].p];
+  b.position = [...world.drops[0].p];
+  step(world, [a, b], 0.05, 350);
+  assert.equal(world.drops.length, 0);
+  assert.equal(a.special?.type, "sword");
+  assert.equal(b.special, null);
+  assert.equal(view(world).drops.length, 0);
+});
+
+test("special weapons use charge or time instead of base ammunition", () => {
+  const world = createWorld(() => 0.5);
+  const pilot = createPilot([0, 0, 8]);
+  world.enemies = [];
+  pilot.special = { type: "shotgun", ammo: 2, until: 0 };
+  assert.equal(fire(world, pilot, [0, 3, 8], [0, 0, -1]), "shotgun");
+  assert.equal(world.shots.length, 8);
+  assert.equal(pilot.special.ammo, 1);
+  fire(world, pilot, [0, 3, 8], [0, 0, -1]);
+  assert.equal(pilot.special, null);
+  pilot.special = { type: "laser", ammo: 2, until: 0 };
+  assert.equal(fire(world, pilot, [0, 3, 8], [0, 0, -1]), "laser");
+  assert.equal(pilot.special, null);
+  assert.ok(world.events.some((event) => event.kind === "beam"));
+  pilot.special = { type: "sword", ammo: 0, until: 1000 };
+  step(world, [pilot], 0.05, 900);
+  assert.equal(fire(world, pilot, [0, 3, 8], [0, 0, -1]), "sword");
+  step(world, [pilot], 0.05, 1000);
+  assert.equal(pilot.special, null);
+});
+
+test("laser beam damages the first enemy and armor shield absorbs incoming damage", () => {
+  const world = createWorld(() => 0.5);
+  const pilot = createPilot([0, 0, 8]);
+  const enemy = world.enemies[0];
+  enemy.pos = [0, 3, -6];
+  world.enemies = [enemy];
+  world.targets = [];
+  pilot.special = { type: "laser", ammo: 4, until: 0 };
+  fire(world, pilot, [0, 3, 4], [0, 0, -1]);
+  assert.equal(enemy.hp, 3);
+  assert.equal(pilot.special.ammo, 2);
+  pilot.shield = 45;
+  world.bolts = [{ id: 10, pos: [0, 3, 9], dir: [0, 0, -1], life: 2, damage: 6, speed: 24 }];
+  step(world, [pilot], 0.05, 50);
+  assert.equal(pilot.armor, 100);
+  assert.equal(pilot.shield, 39);
+});
+
+test("special weapons can hit opponents only in versus worlds", () => {
+  for (const pvp of [false, true]) {
+    const world = createWorld(() => 0.5, { pvp });
+    world.enemies = [];
+    world.targets = [];
+    const shooter = createPilot([0, 0, 8]);
+    const rival = createPilot([0, 0, -4]);
+    shooter.special = { type: "laser", ammo: 4, until: 0 };
+    fire(world, shooter, [0, 3, 6], [0, 0, -1], [shooter, rival]);
+    assert.equal(rival.armor, pvp ? 95 : 100);
+  }
+});
+
+test("explosive cannon damages nearby enemies beyond the direct hit", () => {
+  const world = createWorld(() => 0.5);
+  const pilot = createPilot([0, 0, 8]);
+  const [first, second] = world.enemies;
+  Object.assign(first, { type: "tank", hp: 12, pos: [0, 0, -5] });
+  Object.assign(second, { type: "tank", hp: 12, pos: [3, 0, -5] });
+  world.enemies = [first, second];
+  pilot.special = { type: "cannon", ammo: 1, until: 0 };
+  fire(world, pilot, [0, 1.4, 4], [0, 0, -1]);
+  for (let now = 50; now <= 500; now += 50) step(world, [pilot], 0.05, now);
+  assert.ok(first.hp < 12);
+  assert.ok(second.hp < 12);
+  assert.equal(pilot.special, null);
+});
+
 test("a pilot at zero armor goes down, is ignored, then reboots at spawn", () => {
   const world = createWorld(fixed);
   const pilot = createPilot([4, 0, 8]);

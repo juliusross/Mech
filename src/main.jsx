@@ -14,6 +14,7 @@ import { Effect } from "./Combat.jsx";
 import { DamageSmoke } from "./DamageEffects.jsx";
 import { Enemy, EnemyBolt } from "./Enemies.jsx";
 import { ENEMY_TYPES } from "../shared/enemies.js";
+import { POWERUPS } from "../shared/powerups.js";
 import { MainMenu, Hangar, PlanetSelect, Settings, PauseMenu } from "./Menu.jsx";
 import { initAudio, setVolume, sfx, near } from "./audio.js";
 import { loadSettings, saveSettings } from "./settings.js";
@@ -66,7 +67,7 @@ function RemoteMech({ pilot }) {
         {pilot.onFoot ? (
           <Pilot paint={pilot.paint} />
         ) : (
-          <Mech paint={pilot.paint} cls={pilot.cls} down={pilot.down} fused={fused} thrust={pilot.position[1] > 0.4} />
+          <Mech paint={pilot.paint} cls={pilot.cls} down={pilot.down} fused={fused} thrust={pilot.position[1] > 0.4} weapon={pilot.special?.type} />
         )}
         {!pilot.onFoot && damage >= 0.5 && <DamageSmoke severity={damage} position={[0, 3.5 * scale, 0]} />}
         <Html position={[0, pilot.onFoot ? 2.7 : 5.9 * scale, 0]} center style={{ pointerEvents: "none" }}>
@@ -122,6 +123,29 @@ function Target({ t }) {
   );
 }
 
+function Pickup({ drop }) {
+  const group = useRef();
+  useFrame(({ clock }) => {
+    if (!group.current) return;
+    group.current.rotation.y += 0.018;
+    group.current.position.y = drop.p[1] + Math.sin(clock.elapsedTime * 3 + drop.id) * 0.2;
+  });
+  const power = POWERUPS[drop.type];
+  return <group ref={group} position={drop.p}>
+    <mesh castShadow>
+      <dodecahedronGeometry args={[0.65, 1]} />
+      <meshStandardMaterial color={power.color} emissive={power.color} emissiveIntensity={1.5} metalness={0.4} roughness={0.3} />
+    </mesh>
+    <mesh rotation={[Math.PI / 2, 0, 0]}>
+      <torusGeometry args={[0.9, 0.06, 8, 32]} />
+      <meshBasicMaterial color={power.color} />
+    </mesh>
+    <Html position={[0, 1.2, 0]} center style={{ pointerEvents: "none", whiteSpace: "nowrap", color: "white", fontWeight: 700, textShadow: "0 2px 5px black" }}>
+      {power.name}
+    </Html>
+  </group>;
+}
+
 function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlanet, paused }) {
   const { camera } = useThree();
   const { cls, paint } = settings;
@@ -151,6 +175,12 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
     }
   }
   const me = useRef(createPilot(network.spawn || [0, 0, 8], cls));
+  if (import.meta.env.DEV && !me.current.testWeaponSeeded) {
+    me.current.testWeaponSeeded = true;
+    const testWeapon = new URLSearchParams(location.search).get("testweapon");
+    if (["shotgun", "laser", "cannon", "sword"].includes(testWeapon))
+      me.current.special = { type: testWeapon, ammo: POWERUPS[testWeapon].ammo || 0, until: performance.now() + (POWERUPS[testWeapon].duration || 0) };
+  }
   const [soloScene, setSoloScene] = useState(() => solo.current && view(solo.current));
   const planet = connected ? network.planet || "proving" : soloPlanet;
   const P = planetOf(planet);
@@ -159,6 +189,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
         targets: network.targets,
         enemies: network.enemies || [],
         bolts: network.bolts || [],
+        drops: network.drops || [],
         strikes: network.strikes || [],
         wave: network.wave ?? 1,
         cleared: network.cleared,
@@ -194,11 +225,13 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   useEffect(
     () =>
       onShot((shot) => {
+        if (shot.weapon === "sword" || shot.weapon === "laser") return;
         bullets.current.push({
           id: Math.random(),
           pos: new THREE.Vector3(...shot.origin),
           dir: new THREE.Vector3(...shot.dir),
           life: BULLET_LIFE,
+          kind: shot.weapon,
         });
         sfx.shot(false, near(pos.current.distanceTo(new THREE.Vector3(...shot.origin))) * 0.6);
       }),
@@ -302,7 +335,8 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
         dodge.current = spec.dodgeCooldown;
         burst.current = 0.22;
       }
-      const speed = onFoot ? (k.has("shift") ? 8 : 5) : (burst.current > 0 ? spec.speed * 2.8 : spec.speed) * (driver ? 0.85 : 1);
+      const boost = connected ? (pilot?.speedUntil > 0) : (pilot?.speedUntil > now);
+      const speed = onFoot ? (k.has("shift") ? 8 : 5) : (burst.current > 0 ? spec.speed * 2.8 : spec.speed) * (driver ? 0.85 : 1) * (boost ? 1.35 : 1);
       burst.current -= dt;
       dodge.current -= dt;
       // Grip below 1 (ice) makes the Titan slide toward its intended velocity.
@@ -324,10 +358,10 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       ammo.current = pilot.ammo;
       onAmmo(pilot.ammo);
     }
-    if (!onFoot && k.has("mouse") && cooldown.current <= 0 && ammo.current > 0) {
-      ammo.current--;
-      onAmmo(ammo.current);
-      cooldown.current = spec.fireInterval;
+    const specialType = pilot?.special?.type;
+    if (!onFoot && k.has("mouse") && cooldown.current <= 0 && (specialType || ammo.current > 0)) {
+      if (!specialType) { ammo.current--; onAmmo(ammo.current); }
+      cooldown.current = POWERUPS[specialType]?.interval || spec.fireInterval;
       const muzzle = pos.current
         .clone()
         .add(new THREE.Vector3(1.4 * sc, 3.25 * sc, -2.2 * sc).applyAxisAngle(UP, yaw.current));
@@ -335,14 +369,15 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       const dir = target.sub(muzzle).normalize();
       sfx.shot(cls === "heavy");
       if (connected) {
-        bullets.current.push({ id: Math.random(), pos: muzzle, dir, life: BULLET_LIFE });
+        if (specialType !== "laser" && specialType !== "sword")
+          bullets.current.push({ id: Math.random(), pos: muzzle, dir, life: BULLET_LIFE, kind: specialType });
         network.sendFire(muzzle.toArray(), dir.toArray());
       } else fire(solo.current, me.current, muzzle.toArray(), dir.toArray());
     }
 
     if (connected) {
       bullets.current = bullets.current.filter((b) => {
-        b.pos.addScaledVector(b.dir, BULLET_SPEED * dt);
+        b.pos.addScaledVector(b.dir, (b.kind === "cannon" ? 34 : BULLET_SPEED) * dt);
         b.life -= dt;
         const p = b.pos.toArray();
         if (
@@ -355,7 +390,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
           b.life = 0;
         return b.life > 0;
       });
-      setBulletVisual(bullets.current.map((b) => ({ id: b.id, pos: b.pos.toArray() })));
+      setBulletVisual(bullets.current.map((b) => ({ id: b.id, pos: b.pos.toArray(), kind: b.kind })));
       network.sendMovement(pos.current.toArray(), yaw.current);
     } else if (!paused) {
       me.current.position = pos.current.toArray();
@@ -367,7 +402,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       const events = drainEvents(solo.current);
       if (events.length) addEffects(events);
       setSoloScene(view(solo.current));
-      setBulletVisual(solo.current.shots.map((s) => ({ id: s.id, pos: [...s.pos] })));
+      setBulletVisual(solo.current.shots.map((s) => ({ id: s.id, pos: [...s.pos], kind: s.kind })));
     }
 
     // Sound cues for things that appear in the scene.
@@ -389,6 +424,9 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
 
     const hud = {
       armor: fusion ? fusion.armor : (pilot?.armor ?? spec.armor),
+      shield: pilot?.shield || 0,
+      special: pilot?.special ? { ...pilot.special, until: connected ? pilot.special.until : Math.max(0, pilot.special.until - now) } : null,
+      speed: connected ? (pilot?.speedUntil || 0) : Math.max(0, (pilot?.speedUntil || 0) - now),
       maxArmor: fusion ? fusion.max : classOf(pilot?.cls ?? cls).armor,
       down,
       score: pilot?.score ?? 0,
@@ -455,6 +493,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
             fused={meFusion?.role === "driver"}
             pitch={aimPitch}
             thrust={controls.current.has("f") && !meDown}
+            weapon={mePilot?.special?.type}
           />}
           {!meOnFoot && myDamage >= 0.5 && <DamageSmoke severity={myDamage} position={[0, 3.5 * classOf(cls).scale, 0]} />}
         </group>
@@ -472,6 +511,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       {scene.enemies.map((e) => (
         <Enemy key={e.id} e={e} />
       ))}
+      {(scene.drops || []).map((drop) => <Pickup key={drop.id} drop={drop} />)}
       {scene.bolts.map((b) => (
         <EnemyBolt key={b.id} bolt={b} />
       ))}
@@ -480,8 +520,8 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       ))}
       {bulletVisual.map((b) => (
         <mesh key={b.id} position={b.pos}>
-          <sphereGeometry args={[0.22, 8, 8]} />
-          <meshBasicMaterial color={paint.visor} />
+          <sphereGeometry args={[b.kind === "cannon" ? 0.52 : b.kind === "shotgun" ? 0.15 : 0.22, 8, 8]} />
+          <meshBasicMaterial color={b.kind === "cannon" ? "#ff8051" : paint.visor} />
         </mesh>
       ))}
     </>
@@ -741,6 +781,12 @@ function App() {
             <p>
               Score {hud?.score ?? 0} · Ammo {ammo}/{MAX_AMMO}
             </p>
+            {hud?.special && <p style={{ color: POWERUPS[hud.special.type]?.color }}>
+              {POWERUPS[hud.special.type]?.name} · {hud.special.type === "sword" ? `${Math.ceil(hud.special.until / 1000)}s` : `${hud.special.ammo} charge`}
+            </p>}
+            {Boolean(hud?.shield || hud?.speed) && <p>
+              {hud.shield ? `Shield ${hud.shield}` : ""}{hud.shield && hud.speed ? " · " : ""}{hud.speed ? `Overdrive ${Math.ceil(hud.speed / 1000)}s` : ""}
+            </p>}
             <div className={`armor-bar${pct <= 30 ? " low" : ""}${hud?.fusion ? " fused" : ""}`}>
               <span style={{ width: `${pct}%` }} />
               <em>

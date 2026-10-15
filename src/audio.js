@@ -74,6 +74,15 @@ export const sfx = {
   hit(level = 1) {
     burst({ dur: 0.06, peak: 0.18, filter: "highpass", from: 2500, to: 1800, level });
   },
+  beam(level = 1) {
+    tone({ type: "sawtooth", from: 1550, to: 950, dur: 0.14, peak: 0.09, level });
+  },
+  slash(level = 1) {
+    burst({ dur: 0.18, peak: 0.18, filter: "highpass", from: 1300, to: 4500, level });
+  },
+  pickup(level = 1) {
+    [659, 880, 1175].forEach((f, i) => tone({ type: "triangle", from: f, to: f * 1.15, dur: 0.13, peak: 0.09, delay: i * 0.07, level }));
+  },
   hurt() {
     tone({ type: "square", from: 160, to: 60, dur: 0.18, peak: 0.18 });
     burst({ dur: 0.12, peak: 0.2, from: 900, to: 120 });

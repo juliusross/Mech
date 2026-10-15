@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { WebSocketServer, WebSocket } from "ws";
 import { MAX_AMMO, CLASSES, classOf } from "../shared/arena.js";
 import { PLANETS, cleanPaint } from "../shared/planets.js";
+import { POWERUPS } from "../shared/powerups.js";
 import {
   createWorld,
   createPilot,
@@ -73,6 +74,9 @@ export function createRoomServer({
       ammo: p.ammo,
       score: p.score,
       armor: p.armor,
+      shield: p.shield,
+      speedUntil: Math.max(0, p.speedUntil - Date.now()),
+      special: p.special ? { ...p.special, until: Math.max(0, p.special.until - Date.now()) } : null,
       down: Boolean(p.downUntil),
       cls: p.cls,
       paint: p.paint,
@@ -266,16 +270,16 @@ export function createRoomServer({
         const length = Math.hypot(...d);
         if (length < 0.5 || length > 1.5) return;
         if (Math.hypot(...o.map((v, i) => v - player.position[i])) > 8) return;
-        if (
-          player.ammo <= 0 ||
-          now - player.firedAt < classOf(player.cls).fireInterval * 900
-        )
+        if (player.special?.type === "sword" && now >= player.special.until) player.special = null;
+        const special = player.special?.type;
+        const interval = special ? POWERUPS[special]?.interval : classOf(player.cls).fireInterval;
+        if ((!special && player.ammo <= 0) || now - player.firedAt < (interval || 0.16) * 900)
           return;
-        player.ammo--;
+        if (!special) player.ammo--;
         player.firedAt = now;
         const dir = d.map((v) => v / length);
-        fire(room.world, player, o, dir);
-        const shot = { type: "shot", by: player.id, origin: o, dir };
+        const weapon = fire(room.world, player, o, dir, [...room.players.values()]);
+        const shot = { type: "shot", by: player.id, origin: o, dir, weapon };
         for (const p of room.players.values()) if (p !== player) send(p.ws, shot);
         room.dirty = true;
       } else if (data.type === "paint") {

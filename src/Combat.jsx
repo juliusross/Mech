@@ -122,6 +122,9 @@ export const EFFECT_LIFE = {
   fuse: 1.0,
   unfuse: 0.7,
   strike: 0.6,
+  beam: 0.16,
+  slash: 0.35,
+  pickup: 0.55,
 };
 export function Effect({ effect, onDone }) {
   const mesh = useRef();
@@ -135,7 +138,9 @@ export function Effect({ effect, onDone }) {
     const impact = effect.kind === "boom" || effect.kind === "hit" || effect.kind === "down";
     const flash = impact ? Math.max(0, 1 - age.current / (effect.kind === "hit" ? 0.18 : 0.33)) : 1 - t;
     const size =
-      effect.kind === "boom"
+      effect.kind === "beam"
+        ? 1
+      : effect.kind === "boom"
         ? 0.6 + (1 - flash) * 3.5
         : effect.kind === "repair"
           ? 1 + t * 13
@@ -161,16 +166,26 @@ export function Effect({ effect, onDone }) {
     fuse: "#c48bff",
     unfuse: "#c48bff",
     strike: "#dfe9ff",
+    beam: "#9bf9ff",
+    slash: "#bc8dff",
+    pickup: "#a8ffb0",
   }[effect.kind];
+  const from = new THREE.Vector3(...effect.p);
+  const to = new THREE.Vector3(...(effect.q || effect.p));
+  const beam = to.clone().sub(from);
+  const beamRotation = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), beam.clone().normalize());
   return (
     <>
       <mesh
         ref={mesh}
-        position={effect.p}
-        rotation={effect.kind === "repair" ? [-Math.PI / 2, 0, 0] : [0, 0, 0]}
+        position={effect.kind === "beam" ? from.clone().add(to).multiplyScalar(0.5).toArray() : effect.p}
+        quaternion={effect.kind === "beam" ? beamRotation : undefined}
+        rotation={effect.kind === "repair" || effect.kind === "slash" || effect.kind === "pickup" ? [-Math.PI / 2, 0, 0] : undefined}
       >
-        {effect.kind === "repair" ? (
-          <torusGeometry args={[1, 0.06, 6, 40]} />
+        {effect.kind === "beam" ? (
+          <cylinderGeometry args={[0.12, 0.12, Math.max(0.1, beam.length()), 8]} />
+        ) : effect.kind === "repair" || effect.kind === "slash" || effect.kind === "pickup" ? (
+          <torusGeometry args={[effect.kind === "slash" ? 2.8 : 1, effect.kind === "slash" ? 0.15 : 0.06, 6, 40, effect.kind === "slash" ? Math.PI : Math.PI * 2]} />
         ) : (
           <sphereGeometry args={[1, 14, 10]} />
         )}

@@ -97,6 +97,20 @@ test("room isolates players, relays movement, enforces four slots and cleans dep
   assert.equal(server.rooms.size, 0);
 });
 
+test("room snapshots share a pickup and server spends its special charge", async (t) => {
+  const { server, connect } = await setup(t);
+  const a = await connect("create", "Pilot Alpha");
+  const welcome = await a.wait((m) => m.type === "welcome");
+  const room = server.rooms.get(welcome.room);
+  room.world.drops.push({ id: 900, type: "shotgun", p: [0, 1.1, 8] });
+  const equipped = await a.wait((m) => m.type === "snapshot" && m.players[0]?.special?.type === "shotgun");
+  assert.equal(equipped.players[0].special.ammo, 12);
+  assert.equal(equipped.drops.length, 0);
+  a.send({ type: "fire", origin: [1.4, 3.25, 5.8], dir: [0, 0, -1] });
+  const fired = await a.wait((m) => m.type === "snapshot" && m.players[0]?.special?.ammo === 11);
+  assert.equal(fired.players[0].ammo, 60);
+});
+
 test("pilots leave landed Titans, move on foot, and re-enter only when nearby", async (t) => {
   const { connect, server } = await setup(t);
   const a = await connect("create", "Walker");
