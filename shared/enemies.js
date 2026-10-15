@@ -95,10 +95,33 @@ export const ENEMY_TYPES = {
     bolt: "plasma",
   },
 };
+// The Warlord: a giant siege mech that ends every planet chapter.
+ENEMY_TYPES.boss = {
+  name: "Warlord",
+  hp: 90,
+  speed: 2.6,
+  radius: 4.6,
+  center: 5,
+  range: 75,
+  keep: 30,
+  cooldown: [1.8, 2.6],
+  burst: 5,
+  burstGap: 0.15,
+  damage: 8,
+  boltSpeed: 26,
+  spread: 0.07,
+  score: 40,
+  bolt: "shell",
+};
 export const ENEMY_IDS = Object.keys(ENEMY_TYPES);
+/** Every fourth wave (after three missions) is a boss fight. */
+export const BOSS_EVERY = 4;
+export const isBossWave = (wave) => wave % BOSS_EVERY === 0;
 
 /** How many of each enemy type a wave brings. */
 export function waveRoster(wave) {
+  if (isBossWave(wave))
+    return { boss: 1, drone: 2 + Math.floor(wave / BOSS_EVERY), soldier: 4, vehicle: 0, tank: 0, mech: 0 };
   return {
     drone: Math.min(2 + wave, 6),
     soldier: Math.min(2 + 2 * wave, 12),

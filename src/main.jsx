@@ -11,13 +11,13 @@ import { Mech } from "./Mech.jsx";
 import { Pilot } from "./Pilot.jsx";
 import { RoundedGeometry } from "./RoundedPart.jsx";
 import { PlanetScene } from "./Planet.jsx";
-import { Effect, BloodSplat, Laser, DropBeam } from "./Combat.jsx";
+import { Effect, BloodSplat, Laser, DropBeam, Debris } from "./Combat.jsx";
 import { DamageSmoke } from "./DamageEffects.jsx";
 import { Enemy, EnemyBolt } from "./Enemies.jsx";
 import { ENEMY_TYPES } from "../shared/enemies.js";
 import { POWERUPS } from "../shared/powerups.js";
 import { MainMenu, Hangar, PlanetSelect, Settings, PauseMenu } from "./Menu.jsx";
-import { initAudio, setVolume, sfx, near } from "./audio.js";
+import { initAudio, setVolume, sfx, near, setAmbience } from "./audio.js";
 import { loadSettings, saveSettings } from "./settings.js";
 import { useGamepad } from "./gamepad.js";
 import {
@@ -32,7 +32,7 @@ import {
   weaponOf,
   LASER_COLOR,
 } from "../shared/arena.js";
-import { planetOf, FUSE_SCALE } from "../shared/planets.js";
+import { planetOf, FUSE_SCALE, PLANET_IDS } from "../shared/planets.js";
 import { terrainHeight, WORLD_EDGE } from "../shared/terrain.js";
 import { solidsFor, solidAt, pushOut } from "../shared/obstacles.js";
 import {
@@ -178,7 +178,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   const burst = useRef(0);
   const solo = useRef(null);
   if (!connected && !solo.current) {
-    solo.current = createWorld(Math.random, { planet: soloPlanet, scatter: true });
+    solo.current = createWorld(Math.random, { planet: soloPlanet, scatter: true, campaign: true });
     // Development builds expose the solo world for browser testing.
     if (import.meta.env.DEV) window.__mechverse = { world: solo.current, get me() { return me.current; } };
     // Testing aid: ?testwave=N starts solo play at wave N.
@@ -207,6 +207,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
         drops: network.drops || [],
         strikes: network.strikes || [],
         wave: network.wave ?? 1,
+        planetCleared: false,
         cleared: network.cleared,
         pvp: network.pvp,
       }
@@ -220,6 +221,8 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   const live = useRef(null);
   live.current = { targets: shownTargets, enemies: scene.enemies };
   const wasDown = useRef(false);
+  const boosting = useRef(false);
+  useEffect(() => () => sfx.booster(false), []);
   const wasGunner = useRef(false);
   const wasOnFoot = useRef(false);
   const lastHud = useRef("");
@@ -235,8 +238,9 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       const level = near(pos.current.distanceTo(new THREE.Vector3(...e.p)));
       if (sfx[e.kind]) sfx[e.kind](level);
     }
+    const withDebris = list.flatMap((e) => (e.kind === "boom" ? [e, { ...e, id: `${e.id}d`, kind: "debris" }] : [e]));
     setEffects((old) =>
-      [...old, ...list.map((e) => (e.kind === "repair" ? { ...e, p: [e.p[0], 0.3, e.p[2]] } : e))].slice(-40),
+      [...old, ...withDebris.map((e) => (e.kind === "repair" ? { ...e, p: [e.p[0], 0.3, e.p[2]] } : e))].slice(-40),
     );
   };
   const removeEffect = (id) => setEffects((old) => old.filter((e) => e.id !== id));
@@ -348,6 +352,12 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
 
     // Movement (a gunner rides inside the driver's Titan).
     const flying = k.has("f");
+    // Rocket booster roar while thrusting upward in a Titan.
+    const thrusting = flying && !onFoot && !down && !gunner;
+    if (thrusting !== boosting.current) {
+      boosting.current = thrusting;
+      sfx.booster(thrusting);
+    }
     if (gunner && pilot) {
       pos.current.lerp(new THREE.Vector3(...pilot.position), 1 - Math.exp(-14 * dt));
     } else {
@@ -475,6 +485,11 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       cleared: scene.cleared,
       targetsDown: scene.targets.filter((hp) => hp === 0).length,
       enemies: scene.enemies.length,
+      boss: (() => {
+        const b = scene.enemies.find((e) => e.t === "boss");
+        return b ? Math.round((b.hp / ENEMY_TYPES.boss.hp) * 100) : null;
+      })(),
+      planetCleared: Boolean(scene.planetCleared),
       repairIn: spec.repair ? Math.max(0, Math.ceil((repairReady.current - now) / 1000)) : null,
       pvp: Boolean(scene.pvp),
       planet,
@@ -562,6 +577,8 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       {effects.map((e) =>
         e.kind === "splat" || e.kind === "ouch" ? (
           <BloodSplat key={e.id} effect={e} onDone={removeEffect} />
+        ) : e.kind === "debris" ? (
+          <Debris key={e.id} effect={e} onDone={removeEffect} ground={terrainHeight(planet, e.p[0], e.p[2])} />
         ) : e.kind === "mechdrop" ? (
           <DropBeam key={e.id} effect={e} onDone={removeEffect} />
         ) : (
@@ -632,6 +649,20 @@ function App() {
     setHud(next);
   };
   const playing = inGame && screen === "play" && !paused;
+  const [nextPlanet, setNextPlanet] = useState(PLANET_IDS[1]);
+  useEffect(() => {
+    if (!hud?.planetCleared || connected) return;
+    sfx.wave();
+    const i = PLANET_IDS.indexOf(soloPlanet);
+    setNextPlanet(PLANET_IDS[(i + 1) % PLANET_IDS.length]);
+    if (!settings.cleared.includes(soloPlanet)) update({ cleared: [...settings.cleared, soloPlanet] });
+  }, [hud?.planetCleared]);
+  // Background soundscape: the planet while in battle, machinery in the bay.
+  const AMBIENCE_OF = { proving: "nature", verdant: "jungle", cryo: "wind", tempest: "storm", ember: "volcanic", selene: "moon" };
+  const battlePlanet = connected ? network.planet || "proving" : soloPlanet;
+  useEffect(() => {
+    setAmbience(screen === "hangar" ? "bay" : inGame && screen === "play" ? AMBIENCE_OF[battlePlanet] : null);
+  }, [inGame, screen, battlePlanet]);
   const reload = () => {
     if (!playing || onFootState.current) return;
     setAmmo(MAX_AMMO);
@@ -784,6 +815,10 @@ function App() {
   const maxArmor = hud?.maxArmor ?? spec.armor;
   const pct = Math.round(((hud?.armor ?? maxArmor) / maxArmor) * 100);
   const backFromHangar = back === "play" ? () => setScreen("play") : () => setScreen("menu");
+  const deployNext = () => {
+    update({ planet: nextPlanet });
+    startSolo(nextPlanet);
+  };
 
   return (
     <main>
@@ -851,7 +886,11 @@ function App() {
                 ? "Wave 1"
                 : hud.cleared
                   ? `Wave ${hud.wave} cleared · next wave incoming`
-                  : `Wave ${hud.wave} · Targets ${hud.targetsDown}/12 · Enemies ${hud.enemies}`}
+                  : hud.boss != null
+                    ? `Boss · Warlord · Enemies ${hud.enemies}`
+                    : connected
+                      ? `Wave ${hud.wave} · Targets ${hud.targetsDown}/12 · Enemies ${hud.enemies}`
+                      : `Mission ${((hud.wave - 1) % 4) + 1}/3 · Targets ${hud.targetsDown}/12 · Enemies ${hud.enemies}`}
             </p>
             <p>
               Score {hud?.score ?? 0} · Ammo {ammo}/{MAX_AMMO}
@@ -913,6 +952,39 @@ function App() {
             <div className="aim-hint">Click the arena to aim with your mouse</div>
           )}
           {hit > 0 && <div key={hit} className="hit-flash" aria-hidden="true" />}
+          {hud?.boss != null && (
+            <div className="boss-bar" role="status" aria-label={`Warlord health ${hud.boss}%`}>
+              <strong>WARLORD</strong>
+              <div>
+                <span style={{ width: `${hud.boss}%` }} />
+              </div>
+            </div>
+          )}
+          {hud?.planetCleared && !connected && (
+            <div className="menu cleared" role="dialog" aria-modal="true" aria-label="Planet cleared">
+              <div className="menu-panel">
+                <small>CHAPTER COMPLETE</small>
+                <h2>{P.name} cleared</h2>
+                <p>
+                  Three missions and the Warlord are down. Score {hud.score}. Return to the bay to refit before
+                  deploying to {planetOf(nextPlanet).name}.
+                </p>
+                <nav className="menu-buttons">
+                  <button
+                    className="primary"
+                    onClick={() => {
+                      initAudio();
+                      setInGame(false);
+                      open("hangar", "campaign");
+                    }}
+                  >
+                    Return to the bay
+                  </button>
+                  <button onClick={quit}>Main menu</button>
+                </nav>
+              </div>
+            </div>
+          )}
           {hud?.down && (
             <div className="downed" role="status">
               <strong>TITAN DOWN</strong>
@@ -978,8 +1050,8 @@ function App() {
           settings={settings}
           update={update}
           onBack={backFromHangar}
-          onDeploy={back === "play" ? () => setScreen("play") : () => setScreen("planets")}
-          deployLabel={back === "play" ? "Back to battle" : "Choose planet"}
+          onDeploy={back === "play" ? () => setScreen("play") : back === "campaign" ? deployNext : () => setScreen("planets")}
+          deployLabel={back === "play" ? "Back to battle" : back === "campaign" ? `Deploy to ${planetOf(nextPlanet).name}` : "Choose planet"}
           locked={hud?.fusion ? "Mech class is locked while fused." : ""}
         />
       )}
