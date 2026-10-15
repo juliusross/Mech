@@ -49,6 +49,10 @@ const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 const chest = (p) => [p.position[0], p.position[1] + 3 * sizeOf(p), p.position[2]];
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export const maxArmor = (p) => classOf(p.cls).armor;
+// On foot the pilot has their own health and a small rapid-fire sidearm.
+export const FOOT_HP = 30;
+export const MECH_RESPAWN_MS = 60000;
+export const PILOT_GUN = { interval: 0.09, damage: 0.35, speed: 1.2, spread: 0.04 };
 const isGunner = (p) => p.fusion?.gunner === p;
 /** Hit-box scale: class size, enlarged while driving a fused Titan. */
 export function sizeOf(p) {
@@ -65,6 +69,9 @@ export function createPilot(spawn, cls = "assault") {
     mechPosition: [...spawn],
     mechHeading: 0,
     onFoot: false,
+    footHp: FOOT_HP,
+    mechLost: false,
+    mechReadyAt: 0,
     cls: CLASSES[cls] ? cls : "assault",
     armor: classOf(cls).armor,
     downUntil: 0,
@@ -86,6 +93,7 @@ export function createPilot(spawn, cls = "assault") {
 export function toggleMech(pilot, heading = 0, planet = "proving") {
   if (pilot.downUntil || pilot.fusion) return false;
   if (pilot.onFoot) {
+    if (pilot.mechLost) return false; // replacement Titan has not landed yet
     if (dist(pilot.position, pilot.mechPosition) > 4.5) return false;
     pilot.position = [...pilot.mechPosition];
     pilot.onFoot = false;
@@ -317,6 +325,15 @@ export function drainEvents(world) {
 }
 
 export function fire(world, pilot, origin, dir, pilots = [pilot]) {
+  if (pilot.onFoot) {
+    const d = dir.map((v) => v + (world.random() - 0.5) * 2 * PILOT_GUN.spread);
+    const n = Math.hypot(...d) || 1;
+    world.shots.push({
+      id: world.nextId++, by: pilot, damage: PILOT_GUN.damage, pos: [...origin], dir: d.map((v) => v / n),
+      life: BULLET_LIFE * 0.6, speed: BULLET_SPEED * PILOT_GUN.speed, kind: "pilot",
+    });
+    return "pilot";
+  }
   const weapon = pilot.special?.type;
   const now = world.now || 0;
   if (weapon === "sword" && now >= pilot.special.until) pilot.special = null;
@@ -411,7 +428,7 @@ function endFusion(world, f, now, destroyed) {
     p.fuseReadyAt = now + FUSE_COOLDOWN;
     if (destroyed) {
       p.armor = 0;
-      p.downUntil = now + RESPAWN_MS;
+      eject(world, p, now);
     } else p.armor = Math.max(1, Math.round((f.armor * maxArmor(p)) / f.max));
   }
   const d = f.driver.position;
@@ -427,13 +444,35 @@ function damagePilot(world, p, amount, now) {
     endFusion(world, f, now, true);
     return true;
   }
+  if (p.onFoot) {
+    p.footHp = Math.max(0, p.footHp - amount);
+    if (p.footHp) return false;
+    p.downUntil = now + RESPAWN_MS;
+    event(world, "down", chest(p));
+    return true;
+  }
   const blocked = Math.min(p.shield || 0, amount);
   p.shield = Math.max(0, (p.shield || 0) - blocked);
   p.armor = Math.max(0, p.armor - (amount - blocked));
   if (p.armor) return false;
-  p.downUntil = now + RESPAWN_MS;
-  event(world, "down", chest(p));
+  eject(world, p, now);
   return true;
+}
+
+/** A destroyed Titan throws its pilot clear; a replacement drops in later. */
+function eject(world, p, now) {
+  event(world, "boom", chest(p));
+  event(world, "eject", chest(p));
+  p.mechPosition = [...p.position];
+  p.onFoot = true;
+  p.footHp = FOOT_HP;
+  p.mechLost = true;
+  p.mechReadyAt = now + MECH_RESPAWN_MS;
+  p.special = null;
+  p.shield = 0;
+  const x = clamp(p.position[0] + 3, -WORLD_EDGE, WORLD_EDGE),
+    z = clamp(p.position[2] + 2, -WORLD_EDGE, WORLD_EDGE);
+  p.position = [x, terrainHeight(world.planet, x, z), z];
 }
 
 export function step(world, pilots, dt, now) {
@@ -463,11 +502,25 @@ export function step(world, pilots, dt, now) {
   for (const p of pilots)
     if (p.downUntil && now >= p.downUntil) {
       p.downUntil = 0;
-      p.armor = maxArmor(p);
       p.position = [...p.spawn];
-      p.mechPosition = [...p.spawn];
-      p.onFoot = false;
+      p.footHp = FOOT_HP;
+      // Still waiting for a replacement Titan: respawn at base on foot.
+      if (!p.mechLost) {
+        p.armor = maxArmor(p);
+        p.mechPosition = [...p.spawn];
+        p.onFoot = false;
+      }
       p.respawns++;
+      changed = true;
+    }
+  for (const p of pilots)
+    if (p.mechLost && now >= p.mechReadyAt) {
+      p.mechLost = false;
+      p.armor = maxArmor(p);
+      const x = clamp(p.position[0] + 4, -WORLD_EDGE, WORLD_EDGE),
+        z = p.position[2];
+      p.mechPosition = [x, terrainHeight(world.planet, x, z), z];
+      event(world, "mechdrop", p.mechPosition);
       changed = true;
     }
 
@@ -683,7 +736,7 @@ export function view(world) {
     enemies: world.enemies
       .filter((e) => e.hp > 0)
       .map((e) => ({ id: e.id, t: e.type, p: e.pos.map(r2), hp: e.hp, h: r2(e.heading), a: r2(e.aim) })),
-    bolts: world.bolts.map((b) => ({ id: b.id, p: b.pos.map(r2), k: b.kind })),
+    bolts: world.bolts.map((b) => ({ id: b.id, p: b.pos.map(r2), d: b.dir.map(r2), k: b.kind })),
     drops: world.drops.map((d) => ({ id: d.id, type: d.type, p: d.p.map(r2) })),
     wave: world.wave,
     cleared: Boolean(world.waveAt),

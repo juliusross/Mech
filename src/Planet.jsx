@@ -1,11 +1,10 @@
 import React, { memo, useEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
-import { Sky, Stars } from "@react-three/drei";
+import { Sky, Stars, Environment, Lightformer } from "@react-three/drei";
 import * as THREE from "three";
-import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
 import { planetOf, STRIKE_RADIUS } from "../shared/planets.js";
 import { layoutFor } from "./world/layout.js";
-import { Trees, Bushes, Grass, Rocks } from "./world/Vegetation.jsx";
+import { Trees, Bushes, Grass, Rocks, Flowers, Ferns, Reeds } from "./world/Vegetation.jsx";
 import {
   Roads,
   Buildings,
@@ -29,23 +28,6 @@ import { Instanced } from "./world/Instanced.jsx";
 
 const WEATHER = { ember: "ash", cryo: "snow", tempest: "rain", verdant: "drizzle" };
 
-function Reflections({ planet }) {
-  const { gl, scene } = useThree();
-  useEffect(() => {
-    const generator = new THREE.PMREMGenerator(gl);
-    const room = new RoomEnvironment();
-    const env = generator.fromScene(room, 0.04);
-    scene.environment = env.texture;
-    scene.environmentIntensity = planet === "ember" ? 0.4 : 0.55;
-    return () => {
-      scene.environment = null;
-      env.dispose();
-      room.dispose();
-      generator.dispose();
-    };
-  }, [gl, scene, planet]);
-  return null;
-}
 
 function Lava({ zone }) {
   const mat = useRef();
@@ -182,12 +164,19 @@ const World = memo(function World({ planet }) {
   const L = layoutFor(planet);
   const vegetation = useMemo(() => {
     const raised = (items = []) => items.map((item) => ({ ...item, elevation: terrainHeight(planet, item.x, item.z) }));
-    return { trees: raised(L.trees), bushes: raised(L.bushes), grass: raised(L.grass), rocks: raised(L.rocks) };
+    return {
+      trees: raised(L.trees),
+      bushes: raised(L.bushes),
+      grass: raised(L.grass),
+      rocks: raised(L.rocks),
+      flowers: raised(L.flowers),
+      ferns: raised(L.ferns),
+      reeds: raised(L.reeds),
+    };
   }, [L, planet]);
   const dusk = planet === "ember";
   return (
     <>
-      <Reflections planet={planet} />
       {L.day ? (
         <Sky
           distance={4500}
@@ -201,6 +190,14 @@ const World = memo(function World({ planet }) {
         <color attach="background" args={[P.sky]} />
       )}
       <fog attach="fog" args={[P.sky, ...P.fog]} />
+      {/* Image-based light from planet-tinted light panels: reflections on
+          metal and softer fill, generated locally (no HDR download). */}
+      <Environment resolution={128} frames={1} environmentIntensity={L.day ? 0.9 : 0.6}>
+        <Lightformer form="rect" intensity={L.day ? 3 : 1.4} color={L.day ? "#ffffff" : P.sun} scale={[60, 20, 1]} position={[0, 30, -40]} />
+        <Lightformer form="rect" intensity={1.2} color={P.sky} scale={[80, 10, 1]} position={[0, 8, 50]} rotation={[0, Math.PI, 0]} />
+        <Lightformer form="ring" intensity={L.day ? 4 : 1.6} color={P.sun} scale={14} position={[L.sun[0] * 0.3, L.sun[1] * 0.3, L.sun[2] * 0.3]} />
+        <Lightformer form="rect" intensity={0.6} color={P.ground} scale={[100, 100, 1]} position={[0, -10, 0]} rotation={[Math.PI / 2, 0, 0]} />
+      </Environment>
       <hemisphereLight args={[L.day ? "#dbeeff" : P.sun, P.ground, L.day ? 0.75 : P.ambient * 0.8]} />
       <ambientLight intensity={L.day ? 0.25 : P.ambient * 0.3} />
       <Sun dir={L.sun} color={P.sun} intensity={L.day ? 3.1 : dusk ? 1.6 : 0.9} />
@@ -239,6 +236,9 @@ const World = memo(function World({ planet }) {
       <Trees trees={vegetation.trees} snowy={planet === "cryo"} />
       {L.bushes && <Bushes bushes={vegetation.bushes} />}
       {L.grass?.length > 0 && <Grass grass={vegetation.grass} />}
+      {L.flowers && <Flowers flowers={vegetation.flowers} />}
+      {L.ferns && <Ferns ferns={vegetation.ferns} />}
+      {L.reeds && <Reeds reeds={vegetation.reeds} />}
       <Rocks rocks={vegetation.rocks} color={P.rock} />
       {L.cover && <Cover color={P.rock} />}
       <ArenaStructures planet={planet} />

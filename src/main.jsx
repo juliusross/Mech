@@ -4,13 +4,14 @@ import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 import "./style.css";
 import { Html } from "@react-three/drei";
+import { EffectComposer, Bloom, Vignette } from "@react-three/postprocessing";
 import { useMultiplayer } from "./multiplayer";
 import { RoomPanel } from "./RoomPanel";
 import { Mech } from "./Mech.jsx";
 import { Pilot } from "./Pilot.jsx";
 import { RoundedGeometry } from "./RoundedPart.jsx";
 import { PlanetScene } from "./Planet.jsx";
-import { Effect, BloodSplat } from "./Combat.jsx";
+import { Effect, BloodSplat, Laser, DropBeam } from "./Combat.jsx";
 import { DamageSmoke } from "./DamageEffects.jsx";
 import { Enemy, EnemyBolt } from "./Enemies.jsx";
 import { ENEMY_TYPES } from "../shared/enemies.js";
@@ -29,6 +30,7 @@ import {
   classOf,
   REPAIR_COOLDOWN,
   weaponOf,
+  LASER_COLOR,
 } from "../shared/arena.js";
 import { planetOf, FUSE_SCALE } from "../shared/planets.js";
 import { terrainHeight, WORLD_EDGE } from "../shared/terrain.js";
@@ -44,10 +46,15 @@ import {
   view,
   drainEvents,
   setWeapon,
+  PILOT_GUN,
+  FOOT_HP,
 } from "../shared/sim.js";
 
 const INITIAL_TARGETS = TARGETS.map((t) => ({ ...t, hp: TARGET_HP }));
 const UP = new THREE.Vector3(0, 1, 0);
+const TRACER_SPEED = { cannon: 34, rail: 2.4, minigun: 1.1, rocket: 0.6, pilot: 1.2 };
+const tracerSpeed = (kind) => (kind === "cannon" ? 34 : BULLET_SPEED * (TRACER_SPEED[kind] || 1));
+const laserColor = (pilot) => (pilot?.onFoot ? LASER_COLOR.pilot : LASER_COLOR[pilot?.cls] || LASER_COLOR.assault);
 const AIM_RATE = 0.0025;
 
 function RemoteMech({ pilot }) {
@@ -82,7 +89,7 @@ function RemoteMech({ pilot }) {
           </span>
         </Html>
       </group>
-      {pilot.onFoot && (
+      {pilot.onFoot && !pilot.mechLost && (
         <group position={pilot.mechPosition} rotation={[0, pilot.mechHeading || 0, 0]}>
           <Mech paint={pilot.paint} cls={pilot.cls} />
           {damage >= 0.5 && <DamageSmoke severity={damage} position={[0, 3.5 * scale, 0]} />}
@@ -234,17 +241,21 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   };
   const removeEffect = (id) => setEffects((old) => old.filter((e) => e.id !== id));
   const { onShot, onEvents } = network;
+  const latestPlayers = useRef([]);
+  latestPlayers.current = network.players;
   useEffect(() => onEvents(addEffects), [onEvents]);
   useEffect(
     () =>
       onShot((shot) => {
         if (shot.weapon === "sword" || shot.weapon === "laser") return;
+        const shooter = latestPlayers.current.find((p) => p.id === shot.by);
         bullets.current.push({
           id: Math.random(),
           pos: new THREE.Vector3(...shot.origin),
           dir: new THREE.Vector3(...shot.dir),
           life: BULLET_LIFE,
           kind: shot.weapon,
+          color: shot.weapon === "pilot" ? LASER_COLOR.pilot : laserColor(shooter),
         });
         sfx.shot(false, near(pos.current.distanceTo(new THREE.Vector3(...shot.origin))) * 0.6);
       }),
@@ -283,7 +294,8 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       bullets.current = [];
     }
     if (wasGunner.current && !gunner && pilot) pos.current.set(...pilot.position);
-    if (connected && wasOnFoot.current !== onFoot && pilot) {
+    // Entering, leaving or being ejected from a Titan moves the pilot.
+    if (wasOnFoot.current !== onFoot && pilot) {
       pos.current.set(...pilot.position);
       vel.current.set(0, 0, 0);
       velY.current = 0;
@@ -381,26 +393,31 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       ammo.current = pilot.ammo;
       onAmmo(pilot.ammo);
     }
-    const specialType = pilot?.special?.type;
-    if (!onFoot && k.has("mouse") && cooldown.current <= 0 && (specialType || ammo.current > 0)) {
-      if (!specialType) { ammo.current--; onAmmo(ammo.current); }
-      cooldown.current = POWERUPS[specialType]?.interval || spec.fireInterval * weaponOf(settings.weapon).rate;
+    const specialType = onFoot ? null : pilot?.special?.type;
+    if (k.has("mouse") && cooldown.current <= 0 && (onFoot || specialType || ammo.current > 0)) {
+      if (!specialType && !onFoot) { ammo.current--; onAmmo(ammo.current); }
+      cooldown.current = onFoot
+        ? PILOT_GUN.interval
+        : POWERUPS[specialType]?.interval || spec.fireInterval * weaponOf(settings.weapon).rate;
+      // On foot the pilot fires a small minigun held at hip height.
       const muzzle = pos.current
         .clone()
-        .add(new THREE.Vector3(1.4 * sc, 3.25 * sc, -2.2 * sc).applyAxisAngle(UP, yaw.current));
-      const target = pos.current.clone().add(new THREE.Vector3(0, 3 * sc, 0)).addScaledVector(aimDir, 40);
+        .add((onFoot ? new THREE.Vector3(0.35, 1.25, -0.7) : new THREE.Vector3(1.4 * sc, 3.25 * sc, -2.2 * sc)).applyAxisAngle(UP, yaw.current));
+      const target = pos.current.clone().add(new THREE.Vector3(0, onFoot ? 1.4 : 3 * sc, 0)).addScaledVector(aimDir, 40);
       const dir = target.sub(muzzle).normalize();
-      sfx.shot(cls === "heavy");
+      sfx.shot(cls === "heavy" && !onFoot, onFoot ? 0.45 : 1);
+      const kind = onFoot ? "pilot" : specialType || weaponOf(settings.weapon).kind;
+      const color = onFoot ? LASER_COLOR.pilot : LASER_COLOR[cls];
       if (connected) {
         if (specialType !== "laser" && specialType !== "sword")
-          bullets.current.push({ id: Math.random(), pos: muzzle, dir, life: BULLET_LIFE, kind: specialType });
+          bullets.current.push({ id: Math.random(), pos: muzzle, dir, life: BULLET_LIFE, kind, color });
         network.sendFire(muzzle.toArray(), dir.toArray());
       } else fire(solo.current, me.current, muzzle.toArray(), dir.toArray());
     }
 
     if (connected) {
       bullets.current = bullets.current.filter((b) => {
-        b.pos.addScaledVector(b.dir, (b.kind === "cannon" ? 34 : BULLET_SPEED) * dt);
+        b.pos.addScaledVector(b.dir, tracerSpeed(b.kind) * dt);
         b.life -= dt;
         const p = b.pos.toArray();
         if (
@@ -414,7 +431,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
           b.life = 0;
         return b.life > 0;
       });
-      setBulletVisual(bullets.current.map((b) => ({ id: b.id, pos: b.pos.toArray(), kind: b.kind })));
+      setBulletVisual(bullets.current.map((b) => ({ id: b.id, pos: b.pos.toArray(), dir: b.dir.toArray(), kind: b.kind, color: b.color })));
       network.sendMovement(pos.current.toArray(), yaw.current);
     } else if (!paused) {
       me.current.position = pos.current.toArray();
@@ -426,7 +443,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       const events = drainEvents(solo.current);
       if (events.length) addEffects(events);
       setSoloScene(view(solo.current));
-      setBulletVisual(solo.current.shots.map((s) => ({ id: s.id, pos: [...s.pos], kind: s.kind })));
+      setBulletVisual(solo.current.shots.map((s) => ({ id: s.id, pos: [...s.pos], dir: s.dir, kind: s.kind, color: s.kind === "pilot" ? LASER_COLOR.pilot : LASER_COLOR[s.by.cls] })));
     }
 
     // Sound cues for things that appear in the scene.
@@ -463,7 +480,9 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       planet,
       fusion: fusion ? { role: fusion.role, left: Math.ceil(fusion.left / 1000) } : null,
       onFoot,
-      nearMech: onFoot && pos.current.distanceTo(new THREE.Vector3(...(pilot?.mechPosition || me.current.mechPosition))) <= 4.5,
+      footHp: onFoot ? (pilot?.footHp ?? FOOT_HP) : null,
+      mechIn: pilot?.mechLost ? Math.ceil((connected ? pilot.mechIn : pilot.mechReadyAt - now) / 1000) : 0,
+      nearMech: onFoot && !pilot?.mechLost && pos.current.distanceTo(new THREE.Vector3(...(pilot?.mechPosition || me.current.mechPosition))) <= 4.5,
       fuseIn: connected && pilot ? Math.ceil((pilot.fuseReady || 0) / 1000) : null,
       notice: notice.current.until > now ? notice.current.text : "",
     };
@@ -502,7 +521,7 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
   return (
     <>
       <PlanetScene planet={planet} strikes={scene.strikes || []} />
-      {meOnFoot && (
+      {meOnFoot && !mePilot.mechLost && (
         <group position={mePilot.mechPosition} rotation={[0, mePilot.mechHeading || 0, 0]}>
           <Mech paint={paint} cls={cls} />
           {myDamage >= 0.5 && <DamageSmoke severity={myDamage} position={[0, 3.5 * classOf(cls).scale, 0]} />}
@@ -543,15 +562,18 @@ function Arena({ controls, aim, mode, onHud, onAmmo, network, settings, soloPlan
       {effects.map((e) =>
         e.kind === "splat" || e.kind === "ouch" ? (
           <BloodSplat key={e.id} effect={e} onDone={removeEffect} />
+        ) : e.kind === "mechdrop" ? (
+          <DropBeam key={e.id} effect={e} onDone={removeEffect} />
         ) : (
           <Effect key={e.id} effect={e} onDone={removeEffect} />
         ),
       )}
+      <EffectComposer multisampling={4}>
+        <Bloom mipmapBlur luminanceThreshold={1} luminanceSmoothing={0.2} intensity={0.85} radius={0.7} />
+        <Vignette offset={0.25} darkness={0.55} />
+      </EffectComposer>
       {bulletVisual.map((b) => (
-        <mesh key={b.id} position={b.pos}>
-          <sphereGeometry args={[b.kind === "cannon" ? 0.52 : b.kind === "shotgun" ? 0.15 : 0.22, 8, 8]} />
-          <meshBasicMaterial color={b.kind === "cannon" ? "#ff8051" : paint.visor} />
-        </mesh>
+        <Laser key={b.id} pos={b.pos} dir={b.dir} kind={b.kind} color={b.kind === "cannon" ? "#ff8051" : b.color || LASER_COLOR[cls]} />
       ))}
     </>
   );
@@ -768,7 +790,7 @@ function App() {
       {inGame && (
         <div className="stage" ref={canvasWrap}>
           <Canvas
-            shadows
+            shadows="soft"
             onPointerDown={(e) => {
               initAudio();
               if (!playing) return;
@@ -840,12 +862,20 @@ function App() {
             {Boolean(hud?.shield || hud?.speed) && <p>
               {hud.shield ? `Shield ${hud.shield}` : ""}{hud.shield && hud.speed ? " · " : ""}{hud.speed ? `Overdrive ${Math.ceil(hud.speed / 1000)}s` : ""}
             </p>}
-            <div className={`armor-bar${pct <= 30 ? " low" : ""}${hud?.fusion ? " fused" : ""}`}>
-              <span style={{ width: `${pct}%` }} />
-              <em>
-                {hud?.fusion ? "Fused armor" : "Armor"} {hud?.armor ?? maxArmor}/{maxArmor}
-              </em>
-            </div>
+            {hud?.onFoot ? (
+              <div className={`armor-bar pilot${hud.footHp <= 10 ? " low" : ""}`}>
+                <span style={{ width: `${Math.round((hud.footHp / FOOT_HP) * 100)}%` }} />
+                <em>Pilot health {hud.footHp}/{FOOT_HP} · sidearm minigun</em>
+              </div>
+            ) : (
+              <div className={`armor-bar${pct <= 30 ? " low" : ""}${hud?.fusion ? " fused" : ""}`}>
+                <span style={{ width: `${pct}%` }} />
+                <em>
+                  {hud?.fusion ? "Fused armor" : "Armor"} {hud?.armor ?? maxArmor}/{maxArmor}
+                </em>
+              </div>
+            )}
+            {hud?.mechIn > 0 && <p className="notice">Titan destroyed · replacement drops in {hud.mechIn}s</p>}
             {hud?.fusion && (
               <p className="fusion-line">
                 ⚡ Fused · you are the {hud.fusion.role} · {hud.fusion.left}s
@@ -860,7 +890,9 @@ function App() {
             {hud?.notice && <p className="notice">{hud.notice}</p>}
             <p className="pilot-prompt">
               {hud?.onFoot
-                ? hud.nearMech ? "X · Enter your Titan" : "X · Enter when close to your Titan"
+                ? hud.mechIn > 0
+                  ? "Stay alive on foot · fire your sidearm"
+                  : hud.nearMech ? "X · Enter your Titan" : "Your Titan has landed · walk to it and press X"
                 : "X · Exit your Titan when landed"}
             </p>
             <div className="hud-buttons">
@@ -901,7 +933,7 @@ function App() {
               </div>
             </div>
             <div className="actions">
-              {!hud?.onFoot && button("mouse", "FIRE")}
+              {button("mouse", "FIRE")}
               {!hud?.onFoot && button("f", "UP")}
               {!hud?.onFoot && button("control", "DOWN")}
               {button("shift", hud?.onFoot ? "RUN" : "DODGE")}

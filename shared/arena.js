@@ -75,3 +75,13 @@ export const WEAPONS = {
 };
 export const WEAPON_IDS = Object.keys(WEAPONS);
 export const weaponOf = (id) => WEAPONS[id] || WEAPONS.plasma;
+
+// Laser colour by mech class, for the pilot's sidearm and for enemy fire.
+export const LASER_COLOR = {
+  assault: "#3da8ff",
+  scout: "#3dff6e",
+  heavy: "#ff3b3b",
+  support: "#3dffc8",
+  pilot: "#fff27a",
+};
+export const ENEMY_LASER = { plasma: "#ff3bd0", bullet: "#ffb347", shell: "#ff7a1a" };

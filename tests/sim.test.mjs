@@ -124,24 +124,38 @@ test("explosive cannon damages nearby enemies beyond the direct hit", () => {
   assert.equal(pilot.special, null);
 });
 
-test("a pilot at zero armor goes down, is ignored, then reboots at spawn", () => {
+test("a destroyed Titan ejects its pilot, who fights on foot until a new Titan drops in", () => {
   const world = createWorld(fixed);
+  world.targets = [];
   const pilot = createPilot([4, 0, 8]);
   pilot.armor = BOLT_DAMAGE;
   pilot.position = [30, 0, -20];
   let now = 0;
-  while (!pilot.downUntil && now < 60000) now = run(world, [pilot], 0.05, now);
-  assert.ok(pilot.downUntil, "pilot went down");
-  assert.equal(pilot.armor, 0);
-  const boltsBefore = world.bolts.length;
-  now = run(world, [pilot], 1, now);
-  assert.equal(pilot.armor, 0, "downed pilot takes no further damage");
-  assert.ok(world.bolts.length <= boltsBefore, "drones stop firing at a downed pilot");
-  now = run(world, [pilot], RESPAWN_MS / 1000, now);
-  assert.equal(pilot.downUntil, 0);
-  assert.equal(pilot.armor, MAX_ARMOR);
+  while (!pilot.onFoot && now < 60000) now = run(world, [pilot], 0.05, now);
+  assert.ok(pilot.onFoot && pilot.mechLost, "pilot ejected on foot");
+  assert.equal(pilot.footHp, FOOT_HP);
+  assert.equal(pilot.downUntil, 0, "ejecting is not dying");
+  assert.ok(drainEvents(world).some((e) => e.kind === "eject"));
+  assert.equal(toggleMech(pilot, 0), false, "no Titan to board yet");
+  // The pilot's sidearm works on foot.
+  world.enemies = [];
+  assert.equal(fire(world, pilot, [pilot.position[0], 1.3, pilot.position[2]], [0, 0, -1]), "pilot");
+  assert.equal(world.shots.at(-1).damage, PILOT_GUN.damage);
+  // Killed on foot: respawn at base, still on foot while the Titan is pending.
+  pilot.footHp = 1;
+  world.bolts.push({ id: 900, pos: [pilot.position[0], pilot.position[1] + 1, pilot.position[2] - 2], dir: [0, 0, 1], life: 1, damage: 5, speed: 24 });
+  now = run(world, [pilot], 0.3, now);
+  assert.ok(pilot.downUntil, "pilot down");
+  now = run(world, [pilot], RESPAWN_MS / 1000 + 0.1, now);
   assert.deepEqual(pilot.position, [4, 0, 8]);
-  assert.equal(pilot.respawns, 1);
+  assert.ok(pilot.onFoot && pilot.mechLost);
+  // 60 s after the eject a new Titan lands beside the pilot.
+  now = run(world, [pilot], (pilot.mechReadyAt - now) / 1000 + 0.1, now);
+  assert.equal(pilot.mechLost, false);
+  assert.equal(pilot.armor, MAX_ARMOR);
+  assert.ok(drainEvents(world).some((e) => e.kind === "mechdrop"));
+  assert.ok(toggleMech(pilot, 0), "pilot boards the new Titan");
+  assert.equal(pilot.onFoot, false);
 });
 
 test("shots destroy drones for two points and waves need enemies cleared too", () => {
@@ -228,9 +242,9 @@ test("versus rooms let pilots damage and down each other; co-op rooms do not", (
     run(world, [a, b], 0.5);
     if (pvp) {
       assert.equal(b.armor, 0);
-      assert.ok(b.downUntil);
+      assert.ok(b.onFoot && b.mechLost, "destroyed Titan ejects its pilot");
       assert.equal(a.score, PVP_KO_SCORE);
-      assert.ok(drainEvents(world).some((e) => e.kind === "down"));
+      assert.ok(drainEvents(world).some((e) => e.kind === "eject"));
     } else {
       assert.equal(b.armor, PVP_DAMAGE);
       assert.equal(a.score, 0);
@@ -317,7 +331,7 @@ test("two nearby pilots who both request fusion become one big Titan, then split
   assert.ok(a.fuseReadyAt >= 350 + FUSE_DURATION + FUSE_COOLDOWN);
 });
 
-test("a fused Titan destroyed by damage downs both pilots", () => {
+test("a fused Titan destroyed by damage ejects both pilots", () => {
   const world = createWorld(fixed);
   world.enemies = [];
   const a = createPilot([0, 0, 8]);
@@ -328,7 +342,7 @@ test("a fused Titan destroyed by damage downs both pilots", () => {
   a.fusion.armor = BOLT_DAMAGE;
   world.bolts.push({ id: 999, pos: [0, 3, 6], dir: [0, 0, 1], life: 1, damage: BOLT_DAMAGE, speed: 24 });
   step(world, [a, b], 0.1, 60);
-  assert.ok(a.downUntil && b.downUntil);
+  assert.ok(a.onFoot && b.onFoot && a.mechLost && b.mechLost);
   assert.equal(a.fusion, null);
 });
 
@@ -477,3 +491,5 @@ test("structures stop shots and enemy fire, and push movers out", () => {
   const [fx, fz] = pushOut(world.solids, cx, cz, 1.5, wall.y0 + wall.h + 1);
   assert.deepEqual([fx, fz], [cx, cz], "flying over is allowed");
 });
+
+import { toggleMech, FOOT_HP, PILOT_GUN } from "../shared/sim.js";

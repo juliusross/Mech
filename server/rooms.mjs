@@ -14,6 +14,7 @@ import {
   fire,
   repair,
   requestFuse,
+  PILOT_GUN,
   step,
   view,
   drainEvents,
@@ -71,6 +72,9 @@ export function createRoomServer({
       position: p.position,
       heading: p.heading,
       onFoot: p.onFoot,
+      footHp: p.footHp,
+      mechLost: p.mechLost,
+      mechIn: p.mechLost ? Math.max(0, p.mechReadyAt - Date.now()) : 0,
       mechPosition: p.mechPosition,
       mechHeading: p.mechHeading,
       ammo: p.ammo,
@@ -259,7 +263,6 @@ export function createRoomServer({
         player.updatedAt = now;
         room.dirty = true;
       } else if (data.type === "fire") {
-        if (player.onFoot) return;
         // Shots are simulated here; clients only draw tracers.
         const o = data.origin,
           d = data.dir;
@@ -277,12 +280,15 @@ export function createRoomServer({
         if (Math.hypot(...o.map((v, i) => v - player.position[i])) > 8) return;
         if (player.special?.type === "sword" && now >= player.special.until) player.special = null;
         const special = player.special?.type;
-        const interval = special
-          ? POWERUPS[special]?.interval
-          : classOf(player.cls).fireInterval * weaponOf(player.weapon).rate;
-        if ((!special && player.ammo <= 0) || now - player.firedAt < (interval || 0.16) * 900)
+        const interval = player.onFoot
+          ? PILOT_GUN.interval
+          : special
+            ? POWERUPS[special]?.interval
+            : classOf(player.cls).fireInterval * weaponOf(player.weapon).rate;
+        const usesAmmo = !special && !player.onFoot;
+        if ((usesAmmo && player.ammo <= 0) || now - player.firedAt < (interval || 0.16) * 900)
           return;
-        if (!special) player.ammo--;
+        if (usesAmmo) player.ammo--;
         player.firedAt = now;
         const dir = d.map((v) => v / length);
         const weapon = fire(room.world, player, o, dir, [...room.players.values()]);
