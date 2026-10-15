@@ -5,6 +5,7 @@ import { PLANETS, PLANET_IDS, planetOf } from "../shared/planets.js";
 import { PAINT_PRESETS } from "./settings.js";
 import { Mech } from "./Mech.jsx";
 import { sfx } from "./audio.js";
+import { GAMEPAD_HELP } from "./gamepad.js";
 
 const CLASS_IDS = Object.keys(CLASSES);
 const maxOf = (k) => Math.max(...CLASS_IDS.map((id) => CLASSES[id][k]));
@@ -317,6 +318,12 @@ export function Settings({ settings, update, onBack }) {
           <dd>Exit a landed Titan · enter your Titan when nearby</dd>
           <dt>R · G · V</dt>
           <dd>Reload · Repair (Support) · Fuse with a nearby squadmate</dd>
+          {GAMEPAD_HELP.map(([k, v]) => (
+            <React.Fragment key={k}>
+              <dt>🎮 {k}</dt>
+              <dd>{v}</dd>
+            </React.Fragment>
+          ))}
           <dt>Touch</dt>
           <dd>Drag the arena to aim; use the on-screen buttons</dd>
         </dl>

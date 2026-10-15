@@ -18,6 +18,7 @@ import { POWERUPS } from "../shared/powerups.js";
 import { MainMenu, Hangar, PlanetSelect, Settings, PauseMenu } from "./Menu.jsx";
 import { initAudio, setVolume, sfx, near } from "./audio.js";
 import { loadSettings, saveSettings } from "./settings.js";
+import { useGamepad } from "./gamepad.js";
 import {
   TARGETS,
   TARGET_HP,
@@ -609,6 +610,31 @@ function App() {
     setHud(next);
   };
   const playing = inGame && screen === "play" && !paused;
+  const reload = () => {
+    if (!playing || onFootState.current) return;
+    setAmmo(MAX_AMMO);
+    network.sendReload();
+    window.dispatchEvent(new CustomEvent("mechverse-reload"));
+  };
+  const pad = useGamepad({
+    controls,
+    aim,
+    playing: playing && !friendsOpen,
+    sensitivity: settings.sensitivity,
+    onReload: reload,
+    onCamera: () => setCamera((v) => (v + 1) % 3),
+    onPause: () => {
+      if (!inGame) return;
+      if (friendsOpen) setFriendsOpen(false);
+      else setPaused((p) => !p);
+    },
+    onBack: () => {
+      if (friendsOpen) setFriendsOpen(false);
+      else if (screen === "play" && paused) setPaused(false);
+      else if (screen === "hangar" || screen === "settings") setScreen(back === "play" ? "play" : "menu");
+      else if (screen === "planets") setScreen("menu");
+    },
+  });
 
   useEffect(() => {
     controls.current.clear();
@@ -633,11 +659,7 @@ function App() {
         return;
       }
       if ([" ", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) e.preventDefault();
-      if ((e.key === "r" || e.key === "R") && playing && !onFootState.current) {
-        setAmmo(MAX_AMMO);
-        network.sendReload();
-        window.dispatchEvent(new CustomEvent("mechverse-reload"));
-      }
+      if (e.key === "r" || e.key === "R") reload();
       controls.current.add(e.key.toLowerCase());
     };
     const up = (e) => controls.current.delete(e.key.toLowerCase());
@@ -854,7 +876,8 @@ function App() {
           <div className="crosshair" aria-hidden="true">
             <span />
           </div>
-          {playing && fine() && !locked && (
+          {pad && <div className="pad-badge" aria-live="polite">🎮 Controller connected</div>}
+          {playing && fine() && !locked && !pad && (
             <div className="aim-hint">Click the arena to aim with your mouse</div>
           )}
           {hit > 0 && <div key={hit} className="hit-flash" aria-hidden="true" />}
